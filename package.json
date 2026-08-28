@@ -1,0 +1,118 @@
+{
+  "name": "mail-agent-mcp",
+  "version": "0.1.0",
+  "description": "Local-first email MCP server for Gmail and QQ Mail with OAuth, Windows Credential Manager, IMAP search/read, attachment controls, and preview-confirmed sending.",
+  "main": "dist/index.js",
+  "bin": {
+    "mail-agent-mcp": "dist/index.js",
+    "mail-agent-setup": "dist/setup.js",
+    "mail-agent-enroll": "dist/enroll.js"
+  },
+  "files": [
+    "dist",
+    "public",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE",
+    "docs/agent-integration.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepublishOnly": "npm run build",
+    "build:tsc": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "setup": "tsx src/setup.ts",
+    "enroll": "tsx src/enroll.ts",
+    "web": "tsx src/web/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "tsc --noEmit --skipLibCheck",
+    "check:secrets": "node scripts/check-release-secrets.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gmail-mcp",
+    "qq-mail-mcp",
+    "email-mcp-server",
+    "email-agent",
+    "gmail",
+    "qq-mail",
+    "imap",
+    "smtp",
+    "oauth2",
+    "ai-agent",
+    "typescript",
+    "windows-credential-manager"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/mailparser": "^3.4.6",
+    "@types/node": "^26.0.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/turndown": "^5.0.6",
+    "@vitest/coverage-v8": "^4.1.8",
+    "esbuild": "^0.28.1",
+    "nodemon": "^3.1.10",
+    "semver": "^7.8.4",
+    "tsx": "^4.20.3",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "body-parser": "^2.2.0",
+    "chalk": "^6.0.0",
+    "commander": "^15.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.0",
+    "express": "^5.1.0",
+    "imapflow": "^1.4.2",
+    "koffi": "3.1.5",
+    "mailparser": "^3.9.11",
+    "nodemailer": "^9.0.1",
+    "open": "^11.0.0",
+    "ora": "^9.0.0",
+    "pdf-parse": "^2.4.5",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
+    "undici": "^7.29.0",
+    "zod": "^4.0.0"
+  },
+  "overrides": {
+    "qs": "^6.15.2",
+    "hono": "^4.13.0",
+    "@hono/node-server": "^2.0.5",
+    "fast-uri": "^3.1.4",
+    "ip-address": "^10.4.0",
+    "brace-expansion": "^5.0.9",
+    "postcss": "^8.5.23",
+    "string-width": "^7.2.0",
+    "html-to-text": "10.0.1",
+    "nanoid": "3.3.18"
+  },
+  "contributors": [
+    {
+      "name": "Michael Nikolaus",
+      "role": "Original upstream author"
+    }
+  ],
+  "mcpName": "io.github.SinoEdwards/mail-agent-mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SinoEdwards/mail-agent-mcp.git"
+  },
+  "homepage": "https://github.com/SinoEdwards/mail-agent-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/SinoEdwards/mail-agent-mcp/issues"
+  }
+}

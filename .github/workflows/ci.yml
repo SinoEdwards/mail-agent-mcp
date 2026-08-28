@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.x, 24.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify required build outputs
+        shell: bash
+        run: |
+          test -f dist/index.js
+          test -f dist/setup.js
+          test -f dist/enroll.js
+
+      - name: Lint and type-check
+        run: npm run lint
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Scan tracked files for release secrets
+        run: npm run check:secrets
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit full dependency tree
+        run: npm audit --audit-level=high
+
+      - name: Validate package contents
+        run: npm pack --dry-run

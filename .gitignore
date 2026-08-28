@@ -1,0 +1,60 @@
+﻿# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+
+# User configuration (contains sensitive data)
+.imap-mcp/
+# MCP Registry publisher OAuth tokens
+.mcpregistry_github_token
+.mcpregistry_registry_token
+# Additional secret-bearing files
+.env.*
+!.env.example
+client_secret*.json
+credentials*.json
+token*.json
+*.pem
+*.p12
+*.pfx
+*.token
+
+# Local implementation plans and development status notes
+docs/superpowers/
+docs/phase2-credential-status.md
+credential-export*.json
+
+# Test and package artifacts
+*.tgz
+reports/

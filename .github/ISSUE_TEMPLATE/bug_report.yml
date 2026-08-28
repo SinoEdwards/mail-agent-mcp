@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible Mail Agent MCP defect using synthetic data
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste credentials, real email content, account JSON, proxy URLs with authentication, or Credential Manager exports. Report security issues privately as described in SECURITY.md.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - Gmail
+        - QQ Mail
+        - Generic IMAP/SMTP
+        - Provider-independent
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: 0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js and operating system
+      placeholder: Node 22.12, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Use synthetic accounts and redact all provider data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized error category
+      description: Do not paste raw OAuth, IMAP, SMTP, or Credential Manager responses.
+    validations:
+      required: true
