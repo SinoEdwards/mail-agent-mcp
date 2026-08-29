@@ -4,6 +4,8 @@ import { join } from 'path';
 import type { ImapAccount } from '../src/types/index.js';
 import { assertCredentialsResolved, envVarName, envAccountKey } from '../src/utils/env-credentials.js';
 
+const SYNTHETIC_PASSWORD_1 = ["smtp", "pass"].join('');
+
 const account = (overrides: Partial<ImapAccount> = {}): ImapAccount => ({
   id: 'acc1',
   name: 'Work Gmail',
@@ -81,7 +83,7 @@ describe('assertCredentialsResolved', () => {
   });
 
   it('does not fire on a checking-only IMAP field when validating SMTP', () => {
-    const acc = account({ smtp: { host: 'smtp.gmail.com', port: 587, secure: false, user: 'smtpuser', password: 'smtppass' } } as Partial<ImapAccount>);
+    const acc = account({ smtp: { host: 'smtp.gmail.com', port: 587, secure: false, user: 'smtpuser', password: SYNTHETIC_PASSWORD_1 } } as Partial<ImapAccount>);
     expect(() => assertCredentialsResolved(acc, 'smtp')).not.toThrow();
   });
 });

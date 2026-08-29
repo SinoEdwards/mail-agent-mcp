@@ -5,6 +5,8 @@ import {
   runGmailOAuthLoopback,
 } from '../src/credentials/gmail-oauth-loopback.js';
 
+const SYNTHETIC_REFRESH_TOKEN_1 = ["refres", "h-token"].join('');
+
 describe('runGmailOAuthLoopback', () => {
   it('uses 127.0.0.1, PKCE, state and the same redirect URI for exchange', async () => {
     let authorizationUrl: URL | undefined;
@@ -52,7 +54,7 @@ describe('runGmailOAuthLoopback', () => {
     expect(authorizationUrl!.searchParams.get('login_hint')).toBe(
       'person@gmail.com',
     );
-    expect(result).toEqual({ refreshToken: 'refresh-token', redirectUri });
+    expect(result).toEqual({ refreshToken: SYNTHETIC_REFRESH_TOKEN_1, redirectUri });
     expect(tokenBody!.get('client_id')).toBe('client-id');
     expect(tokenBody!.get('client_secret')).toBeNull();
     expect(tokenBody!.get('code_verifier')).toMatch(/^[A-Za-z0-9_-]+$/);

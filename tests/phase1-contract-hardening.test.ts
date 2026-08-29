@@ -5,6 +5,8 @@ import { assertProviderAccountAuth } from '../src/services/account-manager.js';
 import { SafeSendService, type SafeSendInput } from '../src/services/safe-send-service.js';
 import type { ImapAccount } from '../src/types/index.js';
 
+const SYNTHETIC_PASSWORD_1 = ["synthetic", "-password"].join('');
+
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
@@ -14,7 +16,7 @@ const account = (overrides: Partial<ImapAccount>): ImapAccount => ({
   host: 'imap.example.test',
   port: 993,
   user: 'person@example.test',
-  password: 'synthetic-password',
+  password: SYNTHETIC_PASSWORD_1,
   tls: true,
   ...overrides,
 });

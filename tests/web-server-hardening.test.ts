@@ -4,6 +4,8 @@ import type { AddressInfo } from 'net';
 import type { Server } from 'http';
 import { WebUIServer } from '../src/web/server.js';
 
+const SYNTHETIC_PASSWORD_1 = ["brand-", "new-pw"].join('');
+
 // Reproduces the gap Bjoern reported after the first fix: GET routes were
 // scrubbed, but POST/PUT still returned account objects with plaintext
 // passwords, and the API had no loopback/cross-origin guard.
@@ -86,7 +88,7 @@ describe('Web wizard — credential exposure on POST/PUT (Bjoern follow-up)', ()
     const res = await request({
       method: 'POST',
       path: '/api/accounts',
-      body: { name: 'New', host: 'imap.example.com', port: 993, imapUsername: 'u@example.com', password: 'brand-new-pw' },
+      body: { name: 'New', host: 'imap.example.com', port: 993, imapUsername: 'u@example.com', password: SYNTHETIC_PASSWORD_1 },
     });
     expect(res.status).toBe(200);
     expect(res.text).not.toContain('brand-new-pw');

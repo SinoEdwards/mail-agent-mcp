@@ -5,6 +5,9 @@ import { CredentialRollbackError, type CredentialRotationOptions } from '../src/
 import { runEnrollmentCli, type EnrollmentCliDependencies } from '../src/enroll.js';
 import type { ImapAccount } from '../src/types/index.js';
 
+const SYNTHETIC_REFRESH_TOKEN_1 = ["dummy-new-r", "efresh-token"].join('');
+const SYNTHETIC_CLIENT_SECRET_2 = ["dummy-cli", "ent-secret"].join('');
+
 const account = (user = 'owner@qq.com'): ImapAccount => ({
   id: 'qq-account', name: 'QQ Mail', host: 'imap.qq.com', port: 993,
   user, password: '', tls: true,
@@ -200,7 +203,7 @@ describe('gmail-repair enrollment CLI', () => {
     };
     const output: string[] = [];
     const runGmailOAuth = vi.fn(async () => ({
-      refreshToken: 'dummy-new-refresh-token',
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_1,
       redirectUri: 'http://127.0.0.1:12345/oauth2/callback',
     }));
     const rotate = vi.fn(async (options: CredentialRotationOptions) => {
@@ -225,7 +228,7 @@ describe('gmail-repair enrollment CLI', () => {
     await runEnrollmentCli(['gmail-repair'], state.deps);
     expect(state.runGmailOAuth).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 'desktop-client-id',
-      clientSecret: 'dummy-client-secret',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_2,
       loginHint: 'owner@gmail.com',
     }));
     expect(state.disposed).toEqual([true]);

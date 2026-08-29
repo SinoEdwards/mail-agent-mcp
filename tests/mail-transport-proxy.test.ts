@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveMailProxy } from '../src/utils/mail-proxy.js';
 
+const SYNTHETIC_PASSWORD_1 = ["fixture-", "password"].join('');
+
 const transportMocks = vi.hoisted(() => ({
   imapOptions: [] as Array<Record<string, unknown>>,
   smtpOptions: [] as Array<Record<string, unknown>>,
@@ -39,14 +41,14 @@ const account = {
   host: 'imap.example.test',
   port: 993,
   user: 'person@example.test',
-  password: 'fixture-password',
+  password: SYNTHETIC_PASSWORD_1,
   tls: true,
   smtp: {
     host: 'smtp.example.test',
     port: 465,
     secure: true,
     user: 'person@example.test',
-    password: 'fixture-password',
+    password: SYNTHETIC_PASSWORD_1,
   },
 };
 

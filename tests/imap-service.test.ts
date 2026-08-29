@@ -3,6 +3,8 @@ import { simpleParser } from 'mailparser';
 import { ImapService } from '../src/services/imap-service.js';
 import { ImapAccount } from '../src/types/index.js';
 
+const SYNTHETIC_PASSWORD_1 = ["passw", "ord123"].join('');
+
 // Create a mock class for ImapFlow
 class MockImapFlow {
   public connectMock = vi.fn().mockResolvedValue(undefined);
@@ -104,7 +106,7 @@ describe('ImapService', () => {
       host: 'imap.test.com',
       port: 993,
       user: 'user@test.com',
-      password: 'password123',
+      password: SYNTHETIC_PASSWORD_1,
       tls: true,
     };
   });

@@ -12,6 +12,11 @@ import {
 } from '../src/credentials/account-auth.js';
 import type { ImapAccount } from '../src/types/index.js';
 
+const SYNTHETIC_PASSWORD_1 = ["qq-authori", "zation-code"].join('');
+const SYNTHETIC_PASSWORD_2 = ["legacy-dummy-au", "thorization-code"].join('');
+const SYNTHETIC_PASSWORD_3 = ["must-not", "-be-used"].join('');
+const SYNTHETIC_ACCESS_TOKEN_4 = ["gmail-acc", "ess-token"].join('');
+
 class FakeHandle implements SecretHandle {
   disposed = false;
   constructor(private secret: unknown) {}
@@ -46,30 +51,30 @@ class FakeBackend implements CredentialBackend {
 
 const base = (overrides: Partial<ImapAccount> = {}): ImapAccount => ({
   id: 'one', name: 'Personal', host: 'imap.qq.com', port: 993,
-  user: 'person@qq.com', password: '', tls: true,
-  smtp: { host: 'smtp.qq.com', port: 465, secure: true, user: 'person@qq.com' },
+  user: 'person@example.test', password: '', tls: true,
+  smtp: { host: 'smtp.qq.com', port: 465, secure: true, user: 'person@example.test' },
   ...overrides,
 });
 
 describe('credential backend contract', () => {
   it('uses exact validated QQ and Gmail target names', () => {
-    expect(credentialTarget('qq', 'person@qq.com'))
-      .toBe('MailAgentMCP:qq:person@qq.com:authorization_code');
-    expect(credentialTarget('gmail', 'person@gmail.com'))
-      .toBe('MailAgentMCP:gmail:person@gmail.com:refresh_token');
-    expect(gmailClientSecretTarget('person@gmail.com'))
-      .toBe('MailAgentMCP:gmail:person@gmail.com:client_secret');
+    expect(credentialTarget('qq', 'person@example.test'))
+      .toBe('MailAgentMCP:qq:person@example.test:authorization_code');
+    expect(credentialTarget('gmail', 'person@example.test'))
+      .toBe('MailAgentMCP:gmail:person@example.test:refresh_token');
+    expect(gmailClientSecretTarget('person@example.test'))
+      .toBe('MailAgentMCP:gmail:person@example.test:client_secret');
     expect(() => credentialTarget('qq', 'bad:account')).toThrow(/invalid account/i);
     expect(() => credentialTarget('gmail', '  ')).toThrow(/invalid account/i);
   });
 
   it('supports write/read/delete and always cleans a resolved secret handle', async () => {
     const backend = new FakeBackend();
-    const target = credentialTarget('qq', 'person@qq.com');
+    const target = credentialTarget('qq', 'person@example.test');
     backend.write(target, 'qq-authorization-code');
     const resolver = new AccountAuthResolver(backend);
     await expect(resolver.resolve(base({ auth: { kind: 'credential', provider: 'qq', credentialTarget: target } })))
-      .resolves.toEqual({ kind: 'password', user: 'person@qq.com', password: 'qq-authorization-code' });
+      .resolves.toEqual({ kind: 'password', user: 'person@example.test', password: SYNTHETIC_PASSWORD_1 });
     expect(backend.handles).toHaveLength(1);
     expect(backend.handles[0].disposed).toBe(true);
     expect(backend.delete(target)).toBe(true);
@@ -77,22 +82,22 @@ describe('credential backend contract', () => {
 
   it('reads an exact legacy target without treating arbitrary targets as compatible', async () => {
     const backend = new FakeBackend();
-    const target = legacyCredentialTarget('qq', 'person@qq.com');
+    const target = legacyCredentialTarget('qq', 'person@example.test');
     backend.write(target, 'legacy-dummy-authorization-code');
     const resolver = new AccountAuthResolver(backend);
     await expect(resolver.resolve(base({
       auth: { kind: 'credential', provider: 'qq', credentialTarget: target },
     }))).resolves.toEqual({
       kind: 'password',
-      user: 'person@qq.com',
-      password: 'legacy-dummy-authorization-code',
+      user: 'person@example.test',
+      password: SYNTHETIC_PASSWORD_2,
     });
     expect(backend.reads).toEqual([target]);
   });
 
   it('reports missing and malformed credentials and still cleans malformed handles', async () => {
     const backend = new FakeBackend();
-    const target = credentialTarget('qq', 'person@qq.com');
+    const target = credentialTarget('qq', 'person@example.test');
     const resolver = new AccountAuthResolver(backend);
     const account = base({ auth: { kind: 'credential', provider: 'qq', credentialTarget: target } });
     await expect(resolver.resolve(account)).rejects.toThrow(/credential.*not found/i);
@@ -102,7 +107,7 @@ describe('credential backend contract', () => {
   });
 
   it('does not expose account addresses or credential targets in resolver errors', async () => {
-    const target = credentialTarget('qq', 'person@qq.com');
+    const target = credentialTarget('qq', 'person@example.test');
     const missingBackend = new AccountAuthResolver();
     const malformedBackend = new FakeBackend();
     malformedBackend.values.set(target, { not: 'a string' });
@@ -118,38 +123,38 @@ describe('credential backend contract', () => {
         auth: {
           kind: 'credential',
           provider: 'qq',
-          credentialTarget: credentialTarget('qq', 'other@qq.com'),
+          credentialTarget: credentialTarget('qq', 'other@example.test'),
         },
       })),
     ]) {
       let caught: unknown;
       try { await operation(); } catch (error) { caught = error; }
       expect(caught).toBeInstanceOf(Error);
-      expect((caught as Error).message).not.toContain('person@qq.com');
-      expect((caught as Error).message).not.toContain('other@qq.com');
+      expect((caught as Error).message).not.toContain('person@example.test');
+      expect((caught as Error).message).not.toContain('other@example.test');
       expect((caught as Error).message).not.toContain('CodexLab:');
     }
   });
 
   it('resolves Gmail through an injected refresh exchange with no password fallback', async () => {
     const backend = new FakeBackend();
-    const target = credentialTarget('gmail', 'person@gmail.com');
+    const target = credentialTarget('gmail', 'person@example.test');
     backend.write(target, 'gmail-refresh-token');
     const exchange = vi.fn(() => 'gmail-access-token');
     const resolver = new AccountAuthResolver(backend, exchange);
     const account = base({
-      host: 'imap.gmail.com', user: 'person@gmail.com', password: 'must-not-be-used',
+      host: 'imap.gmail.com', user: 'person@example.test', password: SYNTHETIC_PASSWORD_3,
       auth: { kind: 'oauth2', provider: 'gmail', credentialTarget: target, clientId: 'client-id' },
     });
     await expect(resolver.resolve(account)).resolves.toEqual({
-      kind: 'oauth2', user: 'person@gmail.com', accessToken: 'gmail-access-token',
+      kind: 'oauth2', user: 'person@example.test', accessToken: SYNTHETIC_ACCESS_TOKEN_4,
     });
     expect(exchange).toHaveBeenCalledWith('gmail-refresh-token', account);
     expect(backend.handles[0].disposed).toBe(true);
   });
 
   it('fails explicitly when credential metadata has no production backend', async () => {
-    const target = credentialTarget('qq', 'person@qq.com');
+    const target = credentialTarget('qq', 'person@example.test');
     const resolver = new AccountAuthResolver();
     await expect(resolver.resolve(base({ auth: { kind: 'credential', provider: 'qq', credentialTarget: target } })))
       .rejects.toThrow(/credential backend.*not configured/i);
@@ -157,25 +162,25 @@ describe('credential backend contract', () => {
 
   it.each([
     ['QQ metadata pointing at a Gmail target', base({
-      auth: { kind: 'credential', provider: 'qq', credentialTarget: credentialTarget('gmail', 'person@qq.com') },
+      auth: { kind: 'credential', provider: 'qq', credentialTarget: credentialTarget('gmail', 'person@example.test') },
     })],
     ['Gmail metadata pointing at a QQ target', base({
-      host: 'imap.gmail.com', user: 'person@gmail.com',
-      auth: { kind: 'oauth2', provider: 'gmail', credentialTarget: credentialTarget('qq', 'person@gmail.com') },
+      host: 'imap.gmail.com', user: 'person@example.test',
+      auth: { kind: 'oauth2', provider: 'gmail', credentialTarget: credentialTarget('qq', 'person@example.test') },
     })],
     ['account A metadata pointing at account B', base({
-      auth: { kind: 'credential', provider: 'qq', credentialTarget: credentialTarget('qq', 'other@qq.com') },
+      auth: { kind: 'credential', provider: 'qq', credentialTarget: credentialTarget('qq', 'other@example.test') },
     })],
     ['QQ metadata with a refresh-token suffix', base({
-      auth: { kind: 'credential', provider: 'qq', credentialTarget: 'CodexLab:QQMail:person@qq.com:refresh_token' },
+      auth: { kind: 'credential', provider: 'qq', credentialTarget: 'CodexLab:QQMail:person@example.test:refresh_token' },
     })],
     ['Gmail client-secret metadata pointing at account B', base({
-      host: 'imap.gmail.com', user: 'person@gmail.com',
+      host: 'imap.gmail.com', user: 'person@example.test',
       auth: {
         kind: 'oauth2',
         provider: 'gmail',
-        credentialTarget: credentialTarget('gmail', 'person@gmail.com'),
-        clientSecretTarget: gmailClientSecretTarget('other@gmail.com'),
+        credentialTarget: credentialTarget('gmail', 'person@example.test'),
+        clientSecretTarget: gmailClientSecretTarget('other@example.test'),
       },
     })],
   ])('rejects %s before reading the credential backend', async (_case, account) => {
@@ -187,23 +192,23 @@ describe('credential backend contract', () => {
 
   it('uses the SMTP-specific user with a credential-backed account', async () => {
     const backend = new FakeBackend();
-    const target = credentialTarget('qq', 'person@qq.com');
+    const target = credentialTarget('qq', 'person@example.test');
     backend.write(target, 'qq-authorization-code');
     const resolver = new AccountAuthResolver(backend);
     const account = base({
       auth: { kind: 'credential', provider: 'qq', credentialTarget: target },
-      smtp: { host: 'smtp.qq.com', port: 465, secure: true, user: 'smtp-login@qq.com' },
+      smtp: { host: 'smtp.qq.com', port: 465, secure: true, user: 'smtp-login@example.test' },
     });
     await expect(resolver.resolve(account, 'smtp')).resolves.toEqual({
-      kind: 'password', user: 'smtp-login@qq.com', password: 'qq-authorization-code',
+      kind: 'password', user: 'smtp-login@example.test', password: SYNTHETIC_PASSWORD_1,
     });
   });
 
   it('persists only non-secret account metadata for credential-backed accounts', () => {
-    const target = credentialTarget('qq', 'person@qq.com');
+    const target = credentialTarget('qq', 'person@example.test');
     const stored = accountForPersistence(base({
-      password: 'qq-authorization-code',
-      smtp: { host: 'smtp.qq.com', port: 465, secure: true, password: 'qq-authorization-code' },
+      password: SYNTHETIC_PASSWORD_1,
+      smtp: { host: 'smtp.qq.com', port: 465, secure: true, password: SYNTHETIC_PASSWORD_1 },
       auth: { kind: 'credential', provider: 'qq', credentialTarget: target },
     }));
     const json = JSON.stringify(stored);

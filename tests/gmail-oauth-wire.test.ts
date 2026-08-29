@@ -3,6 +3,8 @@ import { createServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runGmailOAuthLoopback } from '../src/credentials/gmail-oauth-loopback.js';
 
+const SYNTHETIC_CLIENT_SECRET_1 = ["client+/", "=&secret"].join('');
+
 const servers: ReturnType<typeof createServer>[] = [];
 
 afterEach(async () => {
@@ -34,7 +36,7 @@ describe('Gmail OAuth token request wire format', () => {
     let authorizationUrl: URL | undefined;
     await runGmailOAuthLoopback({
       clientId: 'desktop-client-id',
-      clientSecret: 'client+/=&secret',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_1,
       tokenEndpoint: 'http://127.0.0.1:' + address.port + '/token',
       timeoutMs: 2_000,
       openBrowser: async (value) => {

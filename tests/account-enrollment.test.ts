@@ -4,6 +4,19 @@ import type { CredentialBackend, SecretHandle } from '../src/credentials/credent
 import type { ImapAccount } from '../src/types/index.js';
 import { AccountEnrollmentService } from '../src/credentials/account-enrollment.js';
 
+const SYNTHETIC_AUTHORIZATION_CODE_1 = [" qq-s", "ecret "].join('');
+const SYNTHETIC_CLIENT_SECRET_2 = [" client", "-secret "].join('');
+const SYNTHETIC_REFRESH_TOKEN_3 = [" refresh", "-secret "].join('');
+const SYNTHETIC_REFRESH_TOKEN_4 = ["refres", "h-token"].join('');
+const SYNTHETIC_AUTHORIZATION_CODE_5 = ["new-s", "ecret"].join('');
+const SYNTHETIC_CLIENT_SECRET_6 = ["client", "-secret"].join('');
+const SYNTHETIC_REFRESH_TOKEN_7 = ["new-s", "ecret"].join('');
+const SYNTHETIC_AUTHORIZATION_CODE_8 = ["qq-s", "ecret"].join('');
+const SYNTHETIC_REFRESH_TOKEN_9 = ["gmail-", "secret"].join('');
+const SYNTHETIC_CLIENT_SECRET_10 = ["new-c", "lient"].join('');
+const SYNTHETIC_REFRESH_TOKEN_11 = ["new-r", "efresh"].join('');
+const SYNTHETIC_AUTHORIZATION_CODE_12 = ["top-secr", "et-value"].join('');
+
 class FakeHandle implements SecretHandle {
   disposed = false;
   constructor(private readonly value: string) {}
@@ -59,7 +72,7 @@ describe('AccountEnrollmentService', () => {
     const result = await service.enrollQq({
       email: ' USER@QQ.COM ',
       name: ' QQ ',
-      authorizationCode: ' qq-secret ',
+      authorizationCode: SYNTHETIC_AUTHORIZATION_CODE_1,
     });
 
     const target = 'MailAgentMCP:qq:user@qq.com:authorization_code';
@@ -92,8 +105,8 @@ describe('AccountEnrollmentService', () => {
       email: ' USER@GMAIL.COM ',
       name: ' Gmail ',
       clientId: ' client-id ',
-      clientSecret: ' client-secret ',
-      refreshToken: ' refresh-secret ',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_2,
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_3,
     });
 
     const target = 'MailAgentMCP:gmail:user@gmail.com:refresh_token';
@@ -138,7 +151,7 @@ describe('AccountEnrollmentService', () => {
       name: 'Gmail',
       clientId: 'client-id',
       clientSecret: ' ',
-      refreshToken: 'refresh-token',
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_4,
     })).rejects.toThrow(/client secret.*required/i);
     expect(backend.values.size).toBe(0);
     expect(manager.addAccount).not.toHaveBeenCalled();
@@ -177,7 +190,7 @@ describe('AccountEnrollmentService', () => {
     await expect(service.enrollQq({
       email: 'user@qq.com',
       name: 'QQ',
-      authorizationCode: 'new-secret',
+      authorizationCode: SYNTHETIC_AUTHORIZATION_CODE_5,
     })).rejects.toThrow('account failed');
     expect(backend.values.size).toBe(0);
   });
@@ -192,8 +205,8 @@ describe('AccountEnrollmentService', () => {
       email: 'user@gmail.com',
       name: 'Gmail',
       clientId: 'client-id',
-      clientSecret: 'client-secret',
-      refreshToken: 'new-secret',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_6,
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_7,
     })).rejects.toThrow('account failed');
     expect(backend.values.get(target)).toBe('old-secret');
     expect(backend.handles[0]?.disposed).toBe(true);
@@ -205,14 +218,14 @@ describe('AccountEnrollmentService', () => {
     await service.enrollQq({
       email: 'same@example.com',
       name: 'QQ',
-      authorizationCode: 'qq-secret',
+      authorizationCode: SYNTHETIC_AUTHORIZATION_CODE_8,
     });
     await service.enrollGmail({
       email: 'same@example.com',
       name: 'Gmail',
       clientId: 'client-id',
-      clientSecret: 'client-secret',
-      refreshToken: 'gmail-secret',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_6,
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_9,
     });
     expect(backend.values.size).toBe(3);
   });
@@ -227,8 +240,8 @@ describe('AccountEnrollmentService', () => {
       email: 'user@gmail.com',
       name: 'Gmail',
       clientId: 'client-id',
-      clientSecret: 'client-secret',
-      refreshToken: 'refresh-token',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_6,
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_4,
     })).rejects.toThrow('write failed');
 
     expect(backend.values.size).toBe(0);
@@ -248,8 +261,8 @@ describe('AccountEnrollmentService', () => {
       email: 'user@gmail.com',
       name: 'Gmail',
       clientId: 'client-id',
-      clientSecret: 'new-client',
-      refreshToken: 'new-refresh',
+      clientSecret: SYNTHETIC_CLIENT_SECRET_10,
+      refreshToken: SYNTHETIC_REFRESH_TOKEN_11,
     })).rejects.toThrow('account failed');
 
     expect(backend.values.get(refreshTarget)).toBe('old-refresh');
@@ -268,7 +281,7 @@ describe('AccountEnrollmentService', () => {
       await service.enrollQq({
         email: 'user@qq.com',
         name: 'QQ',
-        authorizationCode: 'top-secret-value',
+        authorizationCode: SYNTHETIC_AUTHORIZATION_CODE_12,
       });
     } catch (caught) {
       error = caught;

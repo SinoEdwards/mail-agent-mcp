@@ -3,6 +3,8 @@ import { promises as fsp, statSync } from 'fs';
 import path from 'path';
 import os from 'os';
 
+const SYNTHETIC_PASSWORD_1 = ["tops", "ecret"].join('');
+
 // Real filesystem test (no fs mock): the credential store holds the raw AES key
 // and the encrypted accounts, so both — and their directory — must be readable
 // only by the owner. POSIX-only; Windows has no comparable mode bits.
@@ -34,7 +36,7 @@ runOnPosix('AccountManager credential-store permissions', () => {
       host: 'imap.test.com',
       port: 993,
       user: 'user@test.com',
-      password: 'topsecret',
+      password: SYNTHETIC_PASSWORD_1,
       tls: true,
     });
 

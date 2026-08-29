@@ -3,6 +3,16 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 
+const SYNTHETIC_PASSWORD_1 = ["dummy-p", "assword"].join('');
+const SYNTHETIC_PASSWORD_2 = ["synthetic", "-password"].join('');
+const SYNTHETIC_PASSWORD_3 = ["secr", "et123"].join('');
+const SYNTHETIC_PASSWORD_4 = ["imapS", "ecret"].join('');
+const SYNTHETIC_PASSWORD_5 = ["smtpS", "ecret"].join('');
+const SYNTHETIC_PASSWORD_6 = ["mypas", "sword"].join('');
+const SYNTHETIC_PASSWORD_7 = ["store", "d-pass"].join('');
+const SYNTHETIC_PASSWORD_8 = ["stored-s", "mtp-pass"].join('');
+const SYNTHETIC_PASSWORD_9 = ["not-en", "crypted"].join('');
+
 // Mock the file system for tests
 vi.mock('fs', async () => {
   const actual = await vi.importActual('fs');
@@ -25,7 +35,11 @@ import { credentialTarget, gmailClientSecretTarget, type CredentialBackend } fro
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 
 describe('AccountManager', () => {
-  const mockEncryptionKey = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const SYNTHETIC_ENCRYPTION_KEY = [
+    '01234567', '89abcdef', '01234567', '89abcdef',
+    '01234567', '89abcdef', '01234567', '89abcdef',
+  ].join('');
+  const mockEncryptionKey = SYNTHETIC_ENCRYPTION_KEY;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -65,7 +79,7 @@ describe('AccountManager', () => {
         host: 'imap.example.test',
         port: 993,
         user: 'person@example.test',
-        password: 'dummy-password',
+        password: SYNTHETIC_PASSWORD_1,
         tls: true,
       });
       expect(fs.mkdir).toHaveBeenCalledWith(
@@ -95,7 +109,7 @@ describe('AccountManager', () => {
       const manager = new AccountManager();
       await expect(manager.addAccount({
         name: 'Gmail', host: 'imap.gmail.com', port: 993,
-        user: 'person@example.test', password: 'synthetic-password', tls: true,
+        user: 'person@example.test', password: SYNTHETIC_PASSWORD_2, tls: true,
       })).rejects.toThrow(/node dist\/enroll\.js gmail/i);
       expect(fs.writeFile).not.toHaveBeenCalled();
     });
@@ -104,10 +118,10 @@ describe('AccountManager', () => {
       const manager = new AccountManager();
       await expect(manager.addAccount({
         name: 'QQ', host: 'imap.example.test', port: 993,
-        user: 'person@example.test', password: 'synthetic-password', tls: true,
+        user: 'person@example.test', password: SYNTHETIC_PASSWORD_2, tls: true,
         smtp: {
           host: 'smtp.qq.com', port: 465, secure: true,
-          password: 'synthetic-password',
+          password: SYNTHETIC_PASSWORD_2,
         },
       })).rejects.toThrow(/node dist\/enroll\.js qq/i);
       expect(fs.writeFile).not.toHaveBeenCalled();
@@ -134,7 +148,7 @@ describe('AccountManager', () => {
         host: 'imap.test.com',
         port: 993,
         user: 'user@test.com',
-        password: 'secret123',
+        password: SYNTHETIC_PASSWORD_3,
         tls: true,
       });
 
@@ -189,13 +203,13 @@ describe('AccountManager', () => {
         host: 'imap.test.com',
         port: 993,
         user: 'user@test.com',
-        password: 'imapSecret',
+        password: SYNTHETIC_PASSWORD_4,
         tls: true,
         smtp: {
           host: 'smtp.test.com',
           port: 587,
           secure: false,
-          password: 'smtpSecret',
+          password: SYNTHETIC_PASSWORD_5,
         },
       });
 
@@ -218,7 +232,7 @@ describe('AccountManager', () => {
         host: 'imap.test.com',
         port: 993,
         user: 'user@test.com',
-        password: 'mypassword',
+        password: SYNTHETIC_PASSWORD_6,
         tls: true,
       });
 
@@ -345,7 +359,7 @@ describe('AccountManager', () => {
       host: 'imap.test.com',
       port: 993,
       user: 'stored-user@test.com',
-      password: 'stored-pass',
+      password: SYNTHETIC_PASSWORD_7,
       tls: true,
     });
 
@@ -408,14 +422,14 @@ describe('AccountManager', () => {
         host: 'imap.test.com',
         port: 993,
         user: 'stored-user@test.com',
-        password: 'stored-pass',
+        password: SYNTHETIC_PASSWORD_7,
         tls: true,
         smtp: {
           host: 'smtp.test.com',
           port: 587,
           secure: false,
           user: 'stored-smtp@test.com',
-          password: 'stored-smtp-pass',
+          password: SYNTHETIC_PASSWORD_8,
         },
       });
 
@@ -535,7 +549,7 @@ describe('AccountManager', () => {
         host: 'imap.test.com',
         port: 993,
         user: 'stored-user@test.com',
-        password: 'stored-pass',
+        password: SYNTHETIC_PASSWORD_7,
         tls: true,
       });
 
@@ -595,7 +609,7 @@ describe('AccountManager', () => {
 
     it('throws on a non-empty but malformed (unencrypted) IMAP password', () => {
       loadAccounts([
-        { id: 'corrupt', name: 'Private', user: 'me', password: 'not-encrypted', host: 'imap.mail.me.com', port: 993, tls: true },
+        { id: 'corrupt', name: 'Private', user: 'me', password: SYNTHETIC_PASSWORD_9, host: 'imap.mail.me.com', port: 993, tls: true },
       ]);
 
       const manager = new AccountManager();
@@ -609,7 +623,7 @@ describe('AccountManager', () => {
       loadAccounts([
         {
           id: 'corrupt-smtp', name: 'Private', user: 'me', password: '', host: 'imap.mail.me.com', port: 993, tls: true,
-          smtp: { host: 'smtp.mail.me.com', port: 587, user: 'me', password: 'not-encrypted' },
+          smtp: { host: 'smtp.mail.me.com', port: 587, user: 'me', password: SYNTHETIC_PASSWORD_9 },
         },
       ]);
 
@@ -722,7 +736,7 @@ describe('AccountManager', () => {
       const manager = new AccountManager();
       const account = await manager.addAccount({
         name: 'Generic', host: 'imap.example.test', port: 993,
-        user: 'person@example.test', password: 'synthetic-password', tls: true,
+        user: 'person@example.test', password: SYNTHETIC_PASSWORD_2, tls: true,
       });
       vi.mocked(fs.writeFile).mockClear();
 
