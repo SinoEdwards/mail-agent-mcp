@@ -25,6 +25,11 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # undici 8 raises the runtime floor beyond this project's Node >=22.12 contract.
+      - dependency-name: "undici"
+        update-types:
+          - "version-update:semver-major"
     # Major bumps are intentionally NOT grouped → separate PRs, manual review.
 
   - package-ecosystem: "github-actions"

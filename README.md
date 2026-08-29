@@ -1,8 +1,13 @@
-﻿# Mail Agent MCP
+# Mail Agent MCP
 
-Local-first Gmail and QQ Mail email MCP server for AI agents, with OAuth, Windows Credential Manager, IMAP search/read, attachments, and preview-confirmed sending.
+[![CI](https://github.com/SinoEdwards/mail-agent-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/SinoEdwards/mail-agent-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node.js >=22.12](https://img.shields.io/badge/node-%3E%3D22.12-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+![Status: Public Preview](https://img.shields.io/badge/status-public_preview-orange.svg)
 
-Mail Agent MCP is a TypeScript stdio MCP server for searching, reading, organizing, and safely sending email. Gmail uses OAuth 2.0; QQ Mail uses provider authorization codes. On Windows, provider secrets stay in Windows Credential Manager instead of account JSON.
+Mail Agent MCP is a local-first TypeScript stdio MCP server that gives AI agents a controlled Gmail and QQ Mail interface for IMAP search/read/organization, attachments, and preview-confirmed SMTP sending.
+
+Gmail uses OAuth 2.0; QQ Mail uses provider authorization codes. On Windows, provider secrets stay in Windows Credential Manager instead of account JSON.
 
 > Release status: v0.1.0 Public Preview / Beta. Install from this GitHub repository; the package is not published to npm or the MCP Registry.
 
@@ -45,33 +50,45 @@ Requirements: Windows 10/11 and Node.js 22.12 or newer for hardened Gmail/QQ enr
 
 1. Clone the repository and enter it:
 
-    git clone https://github.com/SinoEdwards/mail-agent-mcp.git
-    cd mail-agent-mcp
+   ```powershell
+   git clone https://github.com/SinoEdwards/mail-agent-mcp.git
+   Set-Location mail-agent-mcp
+   ```
+
 2. Install locked dependencies and build:
 
-    npm ci
-    npm run build
+   ```powershell
+   npm ci
+   npm run build
+   ```
 
 3. Check the enrollment commands:
 
-    node dist/enroll.js --help
+   ```powershell
+   node dist/enroll.js --help
+   ```
 
 4. Enroll at least one provider in an interactive PowerShell terminal:
 
-    node dist/enroll.js gmail
-    node dist/enroll.js qq
+   ```powershell
+   node dist/enroll.js gmail
+   node dist/enroll.js qq
+   ```
 
 5. Register the local build with Codex CLI:
 
-    codex mcp add mail-agent -- node "$PWD\dist\index.js"
-    codex mcp list
+   ```powershell
+   codex mcp add mail-agent -- node "$PWD\dist\index.js"
+   codex mcp list
+   ```
 
 For read-only discovery:
 
-    codex mcp add --env IMAP_MCP_READ_ONLY=true mail-agent-readonly -- node "$PWD\dist\index.js"
+```powershell
+codex mcp add --env IMAP_MCP_READ_ONLY=true mail-agent-readonly -- node "$PWD\dist\index.js"
+```
 
 For other MCP clients, configure a stdio server whose command is node and whose only argument is the absolute path to dist/index.js. Do not copy author-specific paths.
-
 ## Gmail setup
 
 1. In Google Cloud Console, create or select a project and enable the Gmail API.

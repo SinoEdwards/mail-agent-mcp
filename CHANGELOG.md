@@ -7,12 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This section describes downstream work in the current checkout. It has not
-been published under the existing npm or MCP Registry identity. The numbered
-releases below are retained as upstream project history, not as a claim that
-this checkout's Gmail/QQ Credential Manager and safe-send changes shipped in
-those releases.
+No changes yet.
 
+## [0.1.0] - 2026-08-29
+
+Initial public preview of Mail Agent MCP. Install this release from source; it has not been published to npm or the MCP Registry.
 ### Added
 
 - Windows Credential Manager enrollment for Gmail OAuth and QQ Mail
@@ -29,6 +28,8 @@ those releases.
   retried.
 - Provider secrets are excluded from account JSON on the hardened Windows
   paths.
+
+Versions 1.0.0 through 2.0.0 below are retained from [nikolausm/imap-mcp-server](https://github.com/nikolausm/imap-mcp-server) as upstream history and attribution. They are not Mail Agent MCP release claims.
 
 ## [2.0.0] - 2026-08-05
 

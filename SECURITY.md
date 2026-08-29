@@ -1,4 +1,4 @@
-﻿# Security Policy
+# Security Policy
 
 Mail Agent MCP is a local stdio MCP server that gives an AI client access to configured mailboxes. Email content and mailbox-changing actions are sensitive; use the smallest tool surface that meets your needs.
 
@@ -16,6 +16,8 @@ On the hardened Windows provider paths:
 The generic-provider compatibility path is legacy. It can store AES-encrypted passwords in ~/.imap-mcp/accounts.json with a key under the same local directory. This is not equivalent to an OS credential vault and does not protect against an attacker who can read both files.
 
 Never commit accounts.json, .key, OAuth client JSON, tokens, authorization codes, credential exports, or proxy URLs containing credentials.
+
+Tests use explicitly named `SYNTHETIC_*` fixtures assembled from harmless runtime fragments; do not add credential-shaped static literals that secret scanners could mistake for live credentials.
 
 ## Mail and tool boundaries
 
