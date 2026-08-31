@@ -30,7 +30,7 @@ Tests use explicitly named `SYNTHETIC_*` fixtures assembled from harmless runtim
 
 ## Network and privacy
 
-The project contains no telemetry. Expected outbound connections are to configured IMAP/SMTP providers and Gmail OAuth endpoints. A browser is opened for Gmail authorization. `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` may be used for Gmail token HTTP requests. `IMAP_MCP_MAIL_PROXY` optionally tunnels IMAP and SMTP through a supported HTTP CONNECT, HTTPS, or SOCKS proxy. A proxy is a trusted network intermediary: never commit credential-bearing proxy URLs, and keep end-to-end TLS validation enabled.
+The project contains no telemetry. Expected outbound connections are to configured IMAP/SMTP providers and Gmail OAuth endpoints. A browser is opened for Gmail authorization. `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` are inherited by Gmail token HTTP requests and as the default proxy policy for IMAP/SMTP transports. `IMAP_MCP_MAIL_PROXY` optionally overrides the mail transport proxy with a supported HTTP CONNECT, HTTPS, or SOCKS URL. A proxy is a trusted network intermediary: never commit credential-bearing proxy URLs, and keep end-to-end TLS validation enabled.
 
 The optional setup UI binds only to 127.0.0.1. Do not expose it through a LAN bind, port forwarding, tunneling, or a reverse proxy. It has not been designed as a remote administration surface; remote access would require a separate authentication, authorization, CSRF, and session-security design.
 

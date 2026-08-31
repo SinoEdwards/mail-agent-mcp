@@ -1,4 +1,4 @@
-﻿import {
+import {
   EnvHttpProxyAgent,
   fetch as undiciFetch,
   type Dispatcher,
@@ -14,7 +14,7 @@ export interface ProxyEnvironment {
   no_proxy?: string;
 }
 
-interface ProxyFetchDependencies {
+export interface ProxyFetchDependencies {
   createAgent?: (options: {
     httpProxy?: string;
     httpsProxy?: string;
@@ -34,13 +34,30 @@ function value(primary: string | undefined, fallback: string | undefined): strin
   return result || undefined;
 }
 
+export interface NormalizedProxyEnvironment {
+  httpProxy?: string;
+  httpsProxy?: string;
+  noProxy?: string;
+}
+
+export function normalizeProxyEnvironment(
+  env: ProxyEnvironment = process.env,
+): NormalizedProxyEnvironment {
+  const httpProxy = value(env.HTTP_PROXY, env.http_proxy);
+  const httpsProxy = value(env.HTTPS_PROXY, env.https_proxy);
+  const noProxy = value(env.NO_PROXY, env.no_proxy);
+  return {
+    ...(httpProxy ? { httpProxy } : {}),
+    ...(httpsProxy ? { httpsProxy } : {}),
+    ...(noProxy ? { noProxy } : {}),
+  };
+}
+
 export function createProxyAwareFetch(
   env: ProxyEnvironment = process.env,
   dependencies: ProxyFetchDependencies = {},
 ): ProxyAwareFetch {
-  const httpProxy = value(env.HTTP_PROXY, env.http_proxy);
-  const httpsProxy = value(env.HTTPS_PROXY, env.https_proxy);
-  const noProxy = value(env.NO_PROXY, env.no_proxy);
+  const { httpProxy, httpsProxy, noProxy } = normalizeProxyEnvironment(env);
   if (!httpProxy && !httpsProxy) {
     return {
       fetch: (...args) => globalThis.fetch(...args),

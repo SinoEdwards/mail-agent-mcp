@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No changes yet.
 
+## [0.1.1] - 2026-08-31
+
+### Fixed
+
+- SMTP success is committed as sent before bounded Sent-folder copy handling; copy timeout/failure is a warning and never triggers automatic resend.
+- Sent-folder append now has its own timeout, stable failure categories, and stale/pending connection cancellation.
+- Cross-folder search now returns partial results under per-folder and overall deadlines.
+- Direct CLI/MCP launches inherit standard proxy variables, and Gmail token failures expose only safe DNS/TCP/TLS/timeout/HTTP/OAuth categories.
+
 ## [0.1.0] - 2026-08-29
 
 Initial public preview of Mail Agent MCP. Install this release from source; it has not been published to npm or the MCP Registry.

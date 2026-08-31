@@ -13,7 +13,19 @@ export interface SafeSendPayload {
   readonly composer: Readonly<EmailComposer>;
 }
 
-export type SafeSendExecutor = (payload: SafeSendPayload) => void | Promise<void>;
+export interface SafeSendWarning {
+  readonly code: 'sent_copy_timeout' | 'sent_copy_failed';
+  readonly message: string;
+}
+
+export interface SafeSendExecutionResult {
+  readonly warnings?: readonly SafeSendWarning[];
+  readonly secondary?: Promise<SafeSendExecutionResult>;
+}
+
+export type SafeSendExecutor = (
+  payload: SafeSendPayload,
+) => SafeSendExecutionResult | void | Promise<SafeSendExecutionResult | void>;
 
 export interface SafeSendPreview {
   readonly draftId: string;
@@ -29,7 +41,9 @@ export interface SafeSendPreview {
   };
 }
 
-export type SafeSendConfirmation = { status: 'sent' } | { status: 'already_sent' };
+export type SafeSendConfirmation =
+  | { status: 'sent'; warnings?: readonly SafeSendWarning[] }
+  | { status: 'already_sent' };
 
 export interface SafeSendServiceOptions {
   executor: SafeSendExecutor;
@@ -165,16 +179,31 @@ export class SafeSendService {
     if (!entry.payload) throw new Error('Safe-send invariant violation: missing draft payload');
     const executionPayload = freezePayload(entry.payload);
     const operation = (async (): Promise<SafeSendConfirmation> => {
+      let executionResult: SafeSendExecutionResult | void;
       try {
-        await this.executor(executionPayload);
-        this.finish(draftId, entry, 'sent');
-        return { status: 'sent' };
+        executionResult = await this.executor(executionPayload);
       } catch (error) {
         this.finish(draftId, entry, 'ambiguous');
-        throw new Error('Safe-send outcome is ambiguous; retry is blocked', { cause: error });
-      } finally {
         zeroizeAttachments(executionPayload);
+        throw new Error('Safe-send outcome is ambiguous; retry is blocked', { cause: error });
       }
+
+      this.finish(draftId, entry, 'sent');
+      zeroizeAttachments(executionPayload);
+
+      let warnings = executionResult?.warnings;
+      try {
+        const secondaryResult = await executionResult?.secondary;
+        if (secondaryResult?.warnings?.length) {
+          warnings = [...(warnings ?? []), ...secondaryResult.warnings];
+        }
+      } catch {
+        warnings = [{
+          code: 'sent_copy_failed',
+          message: 'Message sent, but saving a Sent-folder copy failed',
+        }];
+      }
+      return warnings?.length ? { status: 'sent', warnings } : { status: 'sent' };
     })();
     entry.inFlight = operation;
     return operation;

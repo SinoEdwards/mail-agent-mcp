@@ -135,12 +135,44 @@ const DOWNLOAD_DIR = process.env.IMAP_DOWNLOAD_DIR || join(homedir(), 'Downloads
 const MAX_UPLOAD_SIZE = parseInt(process.env.IMAP_MAX_UPLOAD_SIZE ?? '', 10) || 25 * 1024 * 1024;
 const UPLOAD_TTL_MS = parseInt(process.env.IMAP_UPLOAD_TTL_MS ?? '', 10) || 24 * 60 * 60 * 1000;
 
+export interface EmailToolRuntimeOptions {
+  searchAllFolderTimeoutMs?: number;
+  searchAllOverallTimeoutMs?: number;
+  searchAllConcurrency?: number;
+}
+
+function positiveInteger(value: number | string | undefined, fallback: number, maximum = Number.MAX_SAFE_INTEGER): number {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), maximum) : fallback;
+}
+
+class FolderSearchTimeoutError extends Error {
+  constructor(readonly category: 'timeout' | 'overall_timeout') {
+    super(category === 'timeout' ? 'Folder search timed out' : 'Overall folder-search deadline exceeded');
+    this.name = 'FolderSearchTimeoutError';
+  }
+}
+
 export function emailTools(
   server: McpServer,
   imapService: ImapService,
   accountManager: AccountManager,
-  smtpService: SmtpService
+  smtpService: SmtpService,
+  runtimeOptions: EmailToolRuntimeOptions = {},
 ): void {
+  const searchAllFolderTimeoutMs = positiveInteger(
+    runtimeOptions.searchAllFolderTimeoutMs ?? process.env.IMAP_SEARCH_FOLDER_TIMEOUT_MS,
+    10_000,
+  );
+  const searchAllOverallTimeoutMs = positiveInteger(
+    runtimeOptions.searchAllOverallTimeoutMs ?? process.env.IMAP_SEARCH_ALL_TIMEOUT_MS,
+    30_000,
+  );
+  const searchAllConcurrency = positiveInteger(
+    runtimeOptions.searchAllConcurrency ?? process.env.IMAP_SEARCH_ALL_CONCURRENCY,
+    1,
+    1,
+  );
   const parseDateOnly = (value: string): Date => {
     const parts = value.split('-').map(Number);
     if (parts.length !== 3 || parts.some(Number.isNaN)) {
@@ -204,27 +236,112 @@ export function emailTools(
     // unless opted in). A folder that fails to open is surfaced in foldersErrored
     // rather than silently swallowed, so a 0-result answer is never ambiguous.
     if (searchAllFolders) {
-      const allFolders = await imapService.listFolders(accountId);
-      const targets = selectSearchFolders(allFolders, { includeTrash, includeSpam, includeDrafts });
+      const deadline = Date.now() + searchAllOverallTimeoutMs;
+      let deadlineExceeded = false;
+      let listTimer: ReturnType<typeof setTimeout> | undefined;
+      const listOutcome = await Promise.race([
+        imapService.listFolders(accountId)
+          .then((folders) => ({ kind: 'folders' as const, folders })),
+        new Promise<{ kind: 'timeout' }>((resolve) => {
+          listTimer = setTimeout(() => resolve({ kind: 'timeout' }), searchAllOverallTimeoutMs);
+        }),
+      ]);
+      if (listTimer !== undefined) clearTimeout(listTimer);
+      if (listOutcome.kind === 'timeout') {
+        imapService.abortConnection(accountId);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              totalFound: 0,
+              returned: 0,
+              foldersSearched: [],
+              partial: true,
+              deadlineExceeded: true,
+              foldersErrored: [{
+                folder: '<folder discovery>',
+                category: 'overall_timeout',
+                error: 'Overall folder-search deadline exceeded',
+              }],
+              messages: [],
+            }, null, 2),
+          }],
+        };
+      }
+      const targets = selectSearchFolders(listOutcome.folders, { includeTrash, includeSpam, includeDrafts });
 
       const collected: Array<EmailMessage & { folder: string }> = [];
       const foldersSearched: string[] = [];
-      const foldersErrored: Array<{ folder: string; error: string }> = [];
+      const foldersErrored: Array<{
+        folder: string;
+        category: 'timeout' | 'overall_timeout' | 'folder_error';
+        error: string;
+      }> = [];
+      let nextTarget = 0;
 
-      for (const folderName of targets) {
+      const searchFolder = async (folderName: string): Promise<void> => {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          deadlineExceeded = true;
+          foldersErrored.push({
+            folder: folderName,
+            category: 'overall_timeout',
+            error: 'Overall folder-search deadline exceeded',
+          });
+          return;
+        }
+
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutMs = Math.min(searchAllFolderTimeoutMs, remainingMs);
         try {
-          const part = await imapService.searchEmails(accountId, folderName, criteria);
+          const part = await Promise.race([
+            imapService.searchEmails(accountId, folderName, criteria),
+            new Promise<never>((_resolve, reject) => {
+              timer = setTimeout(() => {
+                const category = timeoutMs >= remainingMs ? 'overall_timeout' : 'timeout';
+                reject(new FolderSearchTimeoutError(category));
+              }, timeoutMs);
+            }),
+          ]);
           foldersSearched.push(folderName);
           for (const message of part) {
             collected.push({ ...message, folder: folderName });
           }
         } catch (err) {
-          foldersErrored.push({
-            folder: folderName,
-            error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
-          });
+          if (err instanceof FolderSearchTimeoutError) {
+            if (err.category === 'overall_timeout') deadlineExceeded = true;
+            imapService.abortConnection(accountId);
+            foldersErrored.push({
+              folder: folderName,
+              category: err.category,
+              error: err.message,
+            });
+          } else {
+            foldersErrored.push({
+              folder: folderName,
+              category: 'folder_error',
+              error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+            });
+          }
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
         }
-      }
+      };
+
+      const worker = async (): Promise<void> => {
+        while (true) {
+          const index = nextTarget++;
+          if (index >= targets.length) return;
+          await searchFolder(targets[index]!);
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(searchAllConcurrency, targets.length) }, () => worker()),
+      );
+
+      const targetOrder = new Map(targets.map((name, index) => [name, index]));
+      foldersSearched.sort((a, b) => targetOrder.get(a)! - targetOrder.get(b)!);
+      foldersErrored.sort((a, b) => targetOrder.get(a.folder)! - targetOrder.get(b.folder)!);
 
       // Newest first across all folders, then cap to limit.
       collected.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -237,6 +354,8 @@ export function emailTools(
             totalFound: collected.length,
             returned: limitedMessages.length,
             foldersSearched,
+            partial: foldersErrored.length > 0,
+            ...(deadlineExceeded ? { deadlineExceeded: true } : {}),
             ...(foldersErrored.length > 0 ? { foldersErrored } : {}),
             messages: limitedMessages,
           }, null, 2)

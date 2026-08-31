@@ -163,6 +163,7 @@ export function parseRawHeaders(raw: Buffer | string): Record<string, string> {
 
 export class ImapService {
   private connections: Map<string, ConnectionState> = new Map();
+  private pendingConnections: Map<string, ImapFlow> = new Map();
   private reconnectAttempts: Map<string, number> = new Map();
   private maxReconnectAttempts = 3;
   private accountManager?: AccountManager;
@@ -183,7 +184,7 @@ export class ImapService {
     // credential and getting back an indistinguishable "AUTHENTICATE failed".
     if (!account.auth) assertCredentialsResolved(account, 'imap');
     const resolvedAuth = await this.authResolver.resolve(account, 'imap');
-    const proxy = resolveMailProxy();
+    const proxy = resolveMailProxy(process.env, account.host);
 
     const client = new ImapFlow({
       host: account.host,
@@ -204,23 +205,32 @@ export class ImapService {
     client.on('error', (err) => {
       console.error(`IMAP error for account ${account.id}:`, err.message);
       const state = this.connections.get(account.id);
-      if (state) {
+      if (state?.client === client) {
         state.isConnected = false;
       }
     });
 
     client.on('close', () => {
       const state = this.connections.get(account.id);
-      if (state) {
+      if (state?.client === client) {
         state.isConnected = false;
       }
     });
 
+    this.pendingConnections.set(account.id, client);
     try {
       await client.connect();
     } catch (err) {
+      if (this.pendingConnections.get(account.id) === client) {
+        this.pendingConnections.delete(account.id);
+      }
       throw new Error(enrichConnectionError(err, account.host));
     }
+    if (this.pendingConnections.get(account.id) !== client) {
+      client.close();
+      throw new Error('IMAP connection attempt was aborted');
+    }
+    this.pendingConnections.delete(account.id);
 
     this.connections.set(account.id, {
       client,
@@ -240,6 +250,25 @@ export class ImapService {
       }
       this.connections.delete(accountId);
       this.reconnectAttempts.delete(accountId);
+    }
+  }
+
+  /**
+   * Immediately discard a connection whose active operation exceeded a hard
+   * deadline. Unlike disconnect(), this does not wait for a graceful LOGOUT.
+   */
+  abortConnection(accountId: string): void {
+    const state = this.connections.get(accountId);
+    const pending = this.pendingConnections.get(accountId);
+    this.connections.delete(accountId);
+    this.pendingConnections.delete(accountId);
+    this.reconnectAttempts.delete(accountId);
+    for (const client of [state?.client, pending]) {
+      try {
+        client?.close();
+      } catch {
+        // The connection is already unusable; local cache removal is final.
+      }
     }
   }
 
@@ -1465,7 +1494,38 @@ export class ImapService {
    * Returns a structured result so callers can report *why* a save failed
    * instead of a bare `false` (issue #125).
    */
-  async appendToSentFolder(accountId: string, rawMessage: Buffer | string, sentFolderOverride?: string): Promise<SentSaveResult> {
+  async appendToSentFolder(
+    accountId: string,
+    rawMessage: Buffer | string,
+    sentFolderOverride?: string,
+    timeoutMs = 10_000,
+  ): Promise<SentSaveResult> {
+    const deadlineMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 10_000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.appendToSentFolderInternal(accountId, rawMessage, sentFolderOverride),
+        new Promise<SentSaveResult>((resolve) => {
+          timer = setTimeout(() => {
+            this.abortConnection(accountId);
+            resolve({
+              saved: false,
+              errorCategory: 'timeout',
+              error: 'Sent-folder copy timed out',
+            });
+          }, deadlineMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  private async appendToSentFolderInternal(
+    accountId: string,
+    rawMessage: Buffer | string,
+    sentFolderOverride?: string,
+  ): Promise<SentSaveResult> {
     const sentFolderNames = [
       // English / standard
       'Sent Messages', 'Sent', 'INBOX.Sent', 'Sent Items', 'Sent Mail', '[Gmail]/Sent Mail',
@@ -1491,7 +1551,7 @@ export class ImapService {
       const error = 'No Sent folder found: the server advertises no \\Sent SPECIAL-USE folder and no folder matched the known localized names. '
         + 'Use imap_list_folders to find the right folder and set it as the account\'s sentFolder (imap_update_account).';
       console.warn(`[IMAP] ${error} (account ${accountId}; names tried: ${sentFolderNames.join(', ')})`);
-      return { saved: false, error };
+      return { saved: false, errorCategory: 'folder_not_found', error };
     }
 
     try {
@@ -1504,7 +1564,7 @@ export class ImapService {
       const hint = sentFolderOverride
         ? ' The account\'s configured sentFolder may not exist on the server — check it with imap_list_folders.'
         : '';
-      return { saved: false, folder, error: `Failed to append to "${folder}": ${reason}.${hint}` };
+      return { saved: false, folder, errorCategory: 'append_failed', error: `Failed to append to "${folder}": ${reason}.${hint}` };
     }
   }
 
@@ -1589,7 +1649,7 @@ export class ImapService {
   async authenticateOnly(account: ImapAccount): Promise<void> {
     if (!account.auth) assertCredentialsResolved(account, 'imap');
     const resolvedAuth = await this.authResolver.resolve(account, 'imap');
-    const proxy = resolveMailProxy();
+    const proxy = resolveMailProxy(process.env, account.host);
     const client = new ImapFlow({
       host: account.host,
       port: account.port,
@@ -1618,7 +1678,7 @@ export class ImapService {
   async testConnection(account: ImapAccount): Promise<{ success: boolean; folders?: string[]; messageCount?: number; error?: string }> {
     if (!account.auth) assertCredentialsResolved(account, 'imap');
     const resolvedAuth = await this.authResolver.resolve(account, 'imap');
-    const proxy = resolveMailProxy();
+    const proxy = resolveMailProxy(process.env, account.host);
     const testClient = new ImapFlow({
       host: account.host,
       port: account.port,

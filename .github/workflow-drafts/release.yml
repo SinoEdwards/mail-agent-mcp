@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  RELEASE_TAG: v0.1.0
+  RELEASE_TAG: v0.1.1
 
 jobs:
   validate:
@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: >
           node -e "const p=require('./package.json'),l=require('./package-lock.json'),t=process.env.RELEASE_TAG;
-          if(p.name!=='mail-agent-mcp'||p.version!=='0.1.0'||l.name!==p.name||l.version!==p.version||
+          if(p.name!=='mail-agent-mcp'||p.version!=='0.1.1'||l.name!==p.name||l.version!==p.version||
           !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(t)||t.slice(1)!==p.version) process.exit(1)"
       - name: Validate release artifacts
         shell: bash

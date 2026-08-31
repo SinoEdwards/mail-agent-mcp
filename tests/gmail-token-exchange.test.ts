@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Dispatcher } from 'undici';
 import type { ImapAccount } from '../src/types/index.js';
 import type { CredentialBackend, SecretHandle } from '../src/credentials/credential-backend.js';
 import {
@@ -103,7 +104,7 @@ describe('createGmailAccessTokenExchange', () => {
       error = caught;
     }
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe('Gmail token exchange request failed');
+    expect((error as Error).message).toBe('Gmail token exchange request failed (unknown)');
     expect((error as Error).message).not.toMatch(/secret-refresh-token|secret-bearing/);
   });
 
@@ -149,5 +150,72 @@ describe('createGmailAccessTokenExchange', () => {
     await expect(exchange('refresh-token', gmailAccount())).rejects.toThrow(
       'Gmail token exchange timed out',
     );
+  });
+
+  it.each([
+    ['dns', 'ENOTFOUND'],
+    ['tcp', 'ECONNREFUSED'],
+    ['tls', 'ERR_TLS_CERT_ALTNAME_INVALID'],
+    ['timeout', 'ETIMEDOUT'],
+  ])('classifies %s failures without exposing provider details', async (category, code) => {
+    const tokenFetch = vi.fn<TokenFetch>().mockRejectedValue(Object.assign(
+      new Error('secret-refresh-token provider detail'), { code },
+    ));
+    const exchange = createGmailAccessTokenExchange({ fetch: tokenFetch });
+    let caught: unknown;
+    try {
+      await exchange('secret-refresh-token', gmailAccount());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe('Gmail token exchange request failed (' + category + ')');
+    expect((caught as Error).message).not.toMatch(/secret-refresh-token|provider detail/);
+  });
+
+  it('reports an allowlisted OAuth error code with HTTP status but not the response description', async () => {
+    const tokenFetch = vi.fn<TokenFetch>().mockResolvedValue(response(400, {
+      error: 'invalid_grant', error_description: 'secret provider detail',
+    }));
+    const exchange = createGmailAccessTokenExchange({ fetch: tokenFetch });
+    let caught: unknown;
+    try {
+      await exchange('refresh-token', gmailAccount());
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe('Gmail token exchange failed with status 400 (invalid_grant)');
+    expect((caught as Error).message).not.toContain('secret provider detail');
+  });
+
+  it('routes the refresh-token exchange through the configured proxy transport', async () => {
+    const close = vi.fn(async () => undefined);
+    const dispatcher = { close } as unknown as Dispatcher;
+    const createAgent = vi.fn(() => dispatcher);
+    const request = vi.fn(async (_input: unknown, init: Record<string, unknown>) => {
+      expect(init.dispatcher).toBe(dispatcher);
+      return new Response(JSON.stringify({ access_token: 'access-token' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const exchange = createGmailAccessTokenExchange({
+      proxyEnvironment: {
+        HTTP_PROXY: 'http://proxy.example:8080',
+        HTTPS_PROXY: 'http://proxy.example:8080',
+        NO_PROXY: '127.0.0.1,localhost',
+      },
+      proxyFetchDependencies: { createAgent, request: request as never },
+    });
+
+    await expect(exchange('refresh-token', gmailAccount())).resolves.toBe('access-token');
+    expect(createAgent).toHaveBeenCalledWith({
+      httpProxy: 'http://proxy.example:8080',
+      httpsProxy: 'http://proxy.example:8080',
+      noProxy: '127.0.0.1,localhost',
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
   });
 });

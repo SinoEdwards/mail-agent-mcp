@@ -71,4 +71,24 @@ describe('ImapService.appendToSentFolder', () => {
     expect(result.folder).toBe('Typo/Sent');
     expect(result.error).toContain('configured sentFolder');
   });
-});
+
+  it('times out independently, classifies the failure, and aborts the stale connection', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(service, 'findSpecialUseFolder').mockResolvedValue('Sent');
+      append.mockImplementation(() => new Promise(() => undefined));
+      const abort = vi.spyOn(service, 'abortConnection');
+
+      const pending = service.appendToSentFolder('acc1', 'raw message', undefined, 25);
+      await vi.advanceTimersByTimeAsync(25);
+
+      await expect(pending).resolves.toEqual({
+        saved: false,
+        errorCategory: 'timeout',
+        error: 'Sent-folder copy timed out',
+      });
+      expect(abort).toHaveBeenCalledWith('acc1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });});

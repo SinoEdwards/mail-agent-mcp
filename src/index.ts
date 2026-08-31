@@ -24,7 +24,7 @@ dotenv.config();
 
 const server = new McpServer({
   name: 'mail-agent-mcp',
-  version: '0.1.0',
+  version: '0.1.1',
 });
 
 const credentialBackend = process.platform === 'win32'

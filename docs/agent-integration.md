@@ -1,4 +1,4 @@
-﻿# Agent integration contract
+# Agent integration contract
 
 ## Identity
 
@@ -90,7 +90,7 @@ An MCP client can discover tools with tools/list. Do not assume npm availability
 - `IMAP_MCP_READ_ONLY`: truthy values expose the 16-tool mailbox-read-only subset. Attachment download can still write attachment files inside the attachment root, so this is not host-filesystem-read-only.
 - `IMAP_MCP_ENABLED_TOOLS`: non-empty comma-separated allowlist; takes precedence over read-only mode.
 - `IMAP_DOWNLOAD_DIR`, `IMAP_MAX_UPLOAD_SIZE`, `IMAP_UPLOAD_TTL_MS`: attachment root, decoded upload byte limit, and upload lifetime.
-- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and lowercase variants): Gmail token HTTP requests. Keep loopback in `NO_PROXY`.
+- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and lowercase variants): inherited by Gmail token HTTP requests and, unless explicitly overridden, IMAP/SMTP transports. Keep loopback and bypassed provider hosts in `NO_PROXY`.
 - `IMAP_MCP_ACCOUNT_<NAME>_IMAP_USERNAME`, `_IMAP_PASSWORD`, `_SMTP_USERNAME`, `_SMTP_PASSWORD`: startup overrides for legacy generic accounts only.
 - `IMAP_SPAM_DOMAINS`, `IMAP_WHITELIST_DOMAINS`: comma-separated local domain additions.
 - `PORT`: legacy setup UI port only.

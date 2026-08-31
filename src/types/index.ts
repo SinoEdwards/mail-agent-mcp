@@ -87,6 +87,7 @@ export interface SentSaveResult {
   /** Folder the append targeted (resolved or overridden). Absent when no Sent folder could be found. */
   folder?: string;
   /** Why the save failed, when `saved` is false. */
+errorCategory?: 'timeout' | 'folder_not_found' | 'append_failed';
   error?: string;
 }
 

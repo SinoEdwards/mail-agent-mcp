@@ -14,6 +14,7 @@ const mockServer = {
 const mockImapService = {
   listFolders: vi.fn(),
   searchEmails: vi.fn(),
+  abortConnection: vi.fn(),
 };
 
 const mockAccountManager = {
@@ -38,7 +39,11 @@ const msg = (uid: number, date: string, subject = 's') => ({
 describe('imap_search_emails — searchAllFolders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    emailTools(mockServer as any, mockImapService as any, mockAccountManager as any, {} as any);
+    emailTools(mockServer as any, mockImapService as any, mockAccountManager as any, {} as any, {
+      searchAllFolderTimeoutMs: 20,
+      searchAllOverallTimeoutMs: 100,
+      searchAllConcurrency: 2,
+    });
   });
 
   it('registers the handler', () => {
@@ -83,7 +88,8 @@ describe('imap_search_emails — searchAllFolders', () => {
     const parsed = JSON.parse(result.content[0].text);
 
     expect(parsed.foldersSearched).toEqual(['INBOX']);
-    expect(parsed.foldersErrored).toEqual([{ folder: 'Broken', error: 'Command failed' }]);
+    expect(parsed.foldersErrored).toEqual([{ folder: 'Broken', category: 'folder_error', error: 'Command failed' }]);
+    expect(parsed.partial).toBe(true);
     expect(parsed.messages.map((m: any) => m.uid)).toEqual([1]);
   });
 
@@ -156,4 +162,65 @@ describe('imap_search_emails — searchAllFolders', () => {
 
     expect(parsed.messages.map((m: any) => m.uid)).toEqual([3, 2, 1]); // newest first
   });
-});
+
+  it('times out one folder, aborts the stale connection, and continues with partial results', async () => {
+    vi.useFakeTimers();
+    try {
+      mockImapService.listFolders.mockResolvedValueOnce([folder('Hung'), folder('INBOX'), folder('Archive')]);
+      mockImapService.searchEmails.mockImplementation(async (_acc: string, name: string) => {
+        if (name === 'Hung') return new Promise(() => undefined);
+        if (name === 'INBOX') return [msg(1, '2026-01-01')];
+        return [msg(2, '2026-02-01')];
+      });
+
+      const pending = searchHandler({ accountId: 'acc1', searchAllFolders: true, limit: 50 });
+      await vi.advanceTimersByTimeAsync(20);
+      const parsed = JSON.parse((await pending).content[0].text);
+
+      expect(parsed.messages.map((m: any) => m.uid)).toEqual([2, 1]);
+      expect(parsed.foldersSearched).toEqual(expect.arrayContaining(['INBOX', 'Archive']));
+      expect(parsed.foldersErrored).toContainEqual({
+        folder: 'Hung', category: 'timeout', error: 'Folder search timed out',
+      });
+      expect(parsed.partial).toBe(true);
+      expect(mockImapService.abortConnection).toHaveBeenCalledWith('acc1');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('uses connection-safe bounded concurrency instead of overlapping one IMAP session', async () => {
+    mockImapService.listFolders.mockResolvedValueOnce([
+      folder('A'), folder('B'), folder('C'), folder('D'), folder('E'),
+    ]);
+    let active = 0;
+    let maximum = 0;
+    mockImapService.searchEmails.mockImplementation(async () => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return [];
+    });
+
+    await searchHandler({ accountId: 'acc1', searchAllFolders: true, limit: 50 });
+    expect(maximum).toBe(1);
+  });
+
+  it('applies the overall deadline to folder discovery', async () => {
+    vi.useFakeTimers();
+    try {
+      mockImapService.listFolders.mockImplementation(() => new Promise(() => undefined));
+      const pending = searchHandler({ accountId: 'acc1', searchAllFolders: true, limit: 50 });
+      await vi.advanceTimersByTimeAsync(100);
+      const parsed = JSON.parse((await pending).content[0].text);
+      expect(parsed).toMatchObject({
+        totalFound: 0,
+        partial: true,
+        deadlineExceeded: true,
+        foldersErrored: [{ category: 'overall_timeout' }],
+      });
+      expect(mockImapService.searchEmails).not.toHaveBeenCalled();
+      expect(mockImapService.abortConnection).toHaveBeenCalledWith('acc1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });});

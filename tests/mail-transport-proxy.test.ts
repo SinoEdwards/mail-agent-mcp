@@ -58,7 +58,15 @@ describe('resolveMailProxy', () => {
     expect(resolveMailProxy({ IMAP_MCP_MAIL_PROXY: '  ' })).toBeUndefined();
   });
 
-  it.each([
+    it('uses standard HTTPS_PROXY and honors NO_PROXY for direct launches', () => {
+    const env = {
+      HTTPS_PROXY: 'http://standard-proxy.example.test:8080',
+      NO_PROXY: 'localhost,.example.test',
+    };
+    expect(resolveMailProxy(env, 'imap.other.test')).toBe('http://standard-proxy.example.test:8080');
+    expect(resolveMailProxy(env, 'imap.example.test')).toBeUndefined();
+  });
+it.each([
     'http://proxy.example.test:8080',
     'https://proxy.example.test:8443',
     'socks://proxy.example.test:1080',

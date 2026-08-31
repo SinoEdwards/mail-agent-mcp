@@ -1,10 +1,52 @@
-﻿import type { ImapAccount } from '../types/index.js';
+import type { ImapAccount } from '../types/index.js';
 import type { CredentialBackend } from './credential-backend.js';
 import { gmailClientSecretTargetsForAccount } from './credential-backend.js';
-import { createProxyAwareFetch } from './proxy-fetch.js';
+import { createProxyAwareFetch, type ProxyEnvironment, type ProxyFetchDependencies } from './proxy-fetch.js';
 
 const GMAIL_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const DEFAULT_TIMEOUT_MS = 15_000;
+const SAFE_OAUTH_ERRORS = new Set([
+  'invalid_request',
+  'invalid_client',
+  'invalid_grant',
+  'unauthorized_client',
+  'unsupported_grant_type',
+  'invalid_scope',
+]);
+
+type NetworkErrorCategory = 'dns' | 'tcp' | 'tls' | 'timeout' | 'unknown';
+
+function classifyNetworkError(error: unknown): NetworkErrorCategory {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && typeof current === 'object' && current !== null; depth += 1) {
+    const record = current as { name?: unknown; code?: unknown; cause?: unknown };
+    const name = typeof record.name === 'string' ? record.name : '';
+    const code = typeof record.code === 'string' ? record.code.toUpperCase() : '';
+
+    if (
+      name === 'AbortError'
+      || name === 'TimeoutError'
+      || ['ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'].includes(code)
+    ) return 'timeout';
+    if (['ENOTFOUND', 'EAI_AGAIN', 'EAI_FAIL'].includes(code)) return 'dns';
+    if (
+      code.startsWith('ERR_TLS_')
+      || code.startsWith('CERT_')
+      || ['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'].includes(code)
+    ) return 'tls';
+    if (
+      ['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'UND_ERR_SOCKET'].includes(code)
+    ) return 'tcp';
+    current = record.cause;
+  }
+  return 'unknown';
+}
+
+function safeOAuthError(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined;
+  const error = (payload as { error?: unknown }).error;
+  return typeof error === 'string' && SAFE_OAUTH_ERRORS.has(error) ? error : undefined;
+}
 
 interface TokenResponse {
   ok: boolean;
@@ -26,6 +68,8 @@ export interface GmailTokenExchangeOptions {
   fetch?: TokenFetch;
   timeoutMs?: number;
   credentials?: CredentialBackend;
+  proxyEnvironment?: ProxyEnvironment;
+  proxyFetchDependencies?: ProxyFetchDependencies;
 }
 
 function readClientSecret(backend: CredentialBackend, target: string): string {
@@ -71,7 +115,9 @@ export function createGmailAccessTokenExchange(
       clientSecret = readClientSecret(options.credentials, auth.clientSecretTarget);
     }
 
-    const transport = options.fetch ? undefined : createProxyAwareFetch();
+    const transport = options.fetch
+      ? undefined
+      : createProxyAwareFetch(options.proxyEnvironment, options.proxyFetchDependencies);
     const tokenFetch: TokenFetch = options.fetch
       ?? ((input, init) => transport!.fetch(input, init) as Promise<TokenResponse>);
     const controller = new AbortController();
@@ -92,16 +138,23 @@ export function createGmailAccessTokenExchange(
           signal: controller.signal,
         });
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+        const category = classifyNetworkError(error);
+        if (category === 'timeout' && error instanceof Error && error.name === 'AbortError') {
           throw new Error('Gmail token exchange timed out');
         }
-        throw new Error('Gmail token exchange request failed');
+        throw new Error('Gmail token exchange request failed (' + category + ')');
       }
 
       if (!response.ok) {
-        throw new Error(`Gmail token exchange failed with status ${response.status}`);
+        let oauthError: string | undefined;
+        try {
+          oauthError = safeOAuthError(await response.json());
+        } catch {
+          // A malformed provider body must not hide the safe HTTP status.
+        }
+        const suffix = oauthError ? ' (' + oauthError + ')' : '';
+        throw new Error('Gmail token exchange failed with status ' + response.status + suffix);
       }
-
       let payload: unknown;
       try {
         payload = await response.json();

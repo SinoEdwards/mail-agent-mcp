@@ -9,7 +9,7 @@ Mail Agent MCP is a local-first TypeScript stdio MCP server that gives AI agents
 
 Gmail uses OAuth 2.0; QQ Mail uses provider authorization codes. On Windows, provider secrets stay in Windows Credential Manager instead of account JSON.
 
-> Release status: v0.1.0 Public Preview / Beta. Install from this GitHub repository; the package is not published to npm or the MCP Registry.
+> Release status: v0.1.1 Public Preview / Beta. Install from this GitHub repository; the package is not published to npm or the MCP Registry.
 
 ## Features
 
@@ -151,7 +151,7 @@ Gmail authorization opens in the browser; the token endpoint request is made by 
     $env:NO_PROXY = "127.0.0.1,localhost"
     $env:IMAP_MCP_MAIL_PROXY = "http://proxy-host:proxy-port"
 
-`HTTP_PROXY` and `HTTPS_PROXY` cover Gmail OAuth/token HTTP requests. `IMAP_MCP_MAIL_PROXY` separately tunnels IMAP and SMTP through an HTTP CONNECT, HTTPS, or SOCKS proxy. Do not commit proxy URLs containing credentials. `NO_PROXY` should include the loopback OAuth callback. TLS certificate validation remains enabled through the proxy.
+`HTTP_PROXY` and `HTTPS_PROXY` are inherited by Gmail OAuth/token requests and, unless `IMAP_MCP_MAIL_PROXY` is set, by IMAP/SMTP transports launched from the same CLI or MCP process. `IMAP_MCP_MAIL_PROXY` remains the explicit mail-transport override. `NO_PROXY` applies to provider hosts and should include the loopback OAuth callback. Do not commit credential-bearing proxy URLs; TLS validation remains enabled.
 
 ## Configuration reference
 
@@ -166,7 +166,9 @@ Existing process environment values take precedence over values loaded from `.en
 | `IMAP_MAX_UPLOAD_SIZE` | Maximum decoded attachment upload size in bytes; default 25 MiB. |
 | `IMAP_UPLOAD_TTL_MS` | Lifetime of uploaded temporary attachment files; default 24 hours. |
 | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | Gmail OAuth/token HTTP proxy settings; lowercase variants are also accepted. |
-| `IMAP_MCP_MAIL_PROXY` | Optional HTTP CONNECT, HTTPS, or SOCKS proxy URL shared by IMAP and SMTP transports. |
+| `IMAP_MCP_MAIL_PROXY` | Optional explicit HTTP CONNECT, HTTPS, or SOCKS proxy override shared by IMAP and SMTP transports. |
+| `IMAP_SEARCH_FOLDER_TIMEOUT_MS` | Per-folder cross-folder-search deadline; defaults to 10000 ms. |
+| `IMAP_SEARCH_ALL_TIMEOUT_MS` | Overall cross-folder-search deadline, including folder discovery; defaults to 30000 ms. |
 | `IMAP_MCP_ACCOUNT_<NAME>_IMAP_USERNAME` / `_IMAP_PASSWORD` | Startup-only generic IMAP credential overrides. `<NAME>` is the account name uppercased with non-alphanumeric characters replaced by `_`. |
 | `IMAP_MCP_ACCOUNT_<NAME>_SMTP_USERNAME` / `_SMTP_PASSWORD` | Startup-only generic SMTP credential overrides using the same normalized name. |
 | `IMAP_SPAM_DOMAINS`, `IMAP_WHITELIST_DOMAINS` | Comma-separated local spam and allowlist domain additions. |
@@ -238,7 +240,7 @@ The MCP server and generic IMAP features may run there, but hardened Gmail/QQ en
 
 ### Is the npm package available?
 
-No. Version 0.1.0 is installed from [GitHub](https://github.com/SinoEdwards/mail-agent-mcp); npm and MCP Registry publishing remain separate future release decisions.
+No. Version 0.1.1 is installed from [GitHub](https://github.com/SinoEdwards/mail-agent-mcp); npm and MCP Registry publishing remain separate future release decisions.
 
 ## Roadmap
 

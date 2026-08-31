@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Dispatcher } from 'undici';
 import { createProxyAwareFetch } from '../src/credentials/proxy-fetch.js';
 
@@ -43,6 +43,34 @@ describe('createProxyAwareFetch', () => {
       expect(createAgent).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = original;
+    }
+  });
+
+  it('inherits uppercase process proxy variables for direct CLI and MCP entrypoints', async () => {
+    const previous = {
+      HTTP_PROXY: process.env.HTTP_PROXY,
+      HTTPS_PROXY: process.env.HTTPS_PROXY,
+      NO_PROXY: process.env.NO_PROXY,
+    };
+    const close = vi.fn(async () => undefined);
+    const dispatcher = { close } as unknown as Dispatcher;
+    const createAgent = vi.fn(() => dispatcher);
+    try {
+      process.env.HTTP_PROXY = 'http://direct-proxy.example:8080';
+      process.env.HTTPS_PROXY = 'http://direct-secure-proxy.example:8443';
+      process.env.NO_PROXY = '127.0.0.1,localhost';
+      const transport = createProxyAwareFetch(undefined, { createAgent, request: vi.fn() as never });
+      expect(createAgent).toHaveBeenCalledWith({
+        httpProxy: 'http://direct-proxy.example:8080',
+        httpsProxy: 'http://direct-secure-proxy.example:8443',
+        noProxy: '127.0.0.1,localhost',
+      });
+      await transport.close();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 });

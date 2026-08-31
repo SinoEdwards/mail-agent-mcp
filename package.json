@@ -1,6 +1,6 @@
 {
   "name": "mail-agent-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local-first email MCP server for Gmail and QQ Mail with OAuth, Windows Credential Manager, IMAP search/read, attachment controls, and preview-confirmed sending.",
   "main": "dist/index.js",
   "bin": {

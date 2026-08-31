@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { safeSendTools } from '../src/tools/safe-send-tools.js';
 
-function harness() {
+function harness(options: { sentCopyTimeoutMs?: number } = {}) {
   const handlers = new Map<string, Function>();
   const server = { registerTool: vi.fn((name: string, _definition: unknown, handler: Function) => handlers.set(name, handler)) };
   const account = { id: 'acct-1', name: 'Account', host: 'imap.example', port: 993, tls: true, secure: true, user: 'me@example.com', email: 'Me <me@example.com>', password: '', defaultBcc: ['archive@example.com'], smtp: { host: 'smtp.example', port: 465, secure: true } };
@@ -41,11 +41,12 @@ function harness() {
   }) };
   const imapService = {
     appendToSentFolder: vi.fn(async () => ({ saved: true, folder: 'Sent' })),
+    abortConnection: vi.fn(),
     getEmailContent: vi.fn(async () => original),
     getAttachmentContent: vi.fn(async () => ({ filename: 'original.txt', contentType: 'text/plain', content: originalAttachmentBuffer })),
   };
   let nextId = 0;
-  safeSendTools(server as any, imapService as any, accountManager as any, smtpService as any, { id: () => `draft-${++nextId}`, clock: () => 100, ttlMs: 1_000 });
+  safeSendTools(server as any, imapService as any, accountManager as any, smtpService as any, { id: () => `draft-${++nextId}`, clock: () => 100, ttlMs: 1_000, ...options });
   return { handlers, account, accountManager, smtpService, imapService, original, originalAttachmentBuffer, sentSnapshots };
 }
 
@@ -140,5 +141,42 @@ describe('safe-send MCP tools', () => {
     await expect(handlers.get('imap_confirm_send')!({ draftId: 'missing', confirmed: true })).rejects.toThrow(/Unknown|tampered/);
     await expect(handlers.get('imap_confirm_send')!({ draftId: 'missing', confirmed: false })).rejects.toThrow(/confirmed/);
     expect(smtpService.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('returns sent with a warning when the Sent copy times out and never resends', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handlers, imapService, smtpService } = harness({ sentCopyTimeoutMs: 25 });
+      imapService.appendToSentFolder.mockResolvedValue({ saved: false, errorCategory: 'timeout', error: 'Sent-folder copy timed out' });
+      const preview = json(await handlers.get('imap_preview_send_email')!({
+        accountId: 'acct-1', to: 'you@example.com', subject: 'timeout', text: 'body',
+      }));
+      const confirmation = handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true });
+      await vi.advanceTimersByTimeAsync(25);
+      const result = json(await confirmation);
+      expect(result).toEqual({
+        status: 'sent',
+        warnings: [{ code: 'sent_copy_timeout', message: 'Message sent, but saving a Sent-folder copy timed out' }],
+      });
+      const retry = json(await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true }));
+      expect(retry.status).toBe('already_sent');
+      expect(smtpService.sendEmail).toHaveBeenCalledTimes(1);
+      expect(imapService.appendToSentFolder).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps SMTP success final when the Sent copy reports failure', async () => {
+    const { handlers, imapService, smtpService } = harness({ sentCopyTimeoutMs: 25 });
+    imapService.appendToSentFolder.mockResolvedValue({ saved: false, error: 'provider detail' });
+    const preview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'failure', text: 'body',
+    }));
+    const result = json(await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true }));
+    expect(result).toEqual({
+      status: 'sent',
+      warnings: [{ code: 'sent_copy_failed', message: 'Message sent, but saving a Sent-folder copy failed' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('provider detail');
+    expect(smtpService.sendEmail).toHaveBeenCalledTimes(1);
   });
 });

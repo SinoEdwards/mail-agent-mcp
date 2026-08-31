@@ -79,7 +79,7 @@ describe('public release surface', () => {
 
   it('uses the approved independent GitHub identity and keeps publishing disabled', () => {
     const pkg = JSON.parse(read('package.json')) as Record<string, unknown>;
-    expect(pkg).toMatchObject({ name: 'mail-agent-mcp', version: '0.1.0' });
+    expect(pkg).toMatchObject({ name: 'mail-agent-mcp', version: '0.1.1' });
     expect(pkg).toMatchObject({
       mcpName: 'io.github.SinoEdwards/mail-agent-mcp',
       repository: {
@@ -92,7 +92,7 @@ describe('public release surface', () => {
     const server = JSON.parse(read('server.json')) as Record<string, unknown>;
     expect(server).toMatchObject({
       name: 'io.github.SinoEdwards/mail-agent-mcp',
-      version: '0.1.0',
+      version: '0.1.1',
       repository: { url: 'https://github.com/SinoEdwards/mail-agent-mcp' },
     });
     expect(() => read('.github/workflows/release.yml')).toThrow();

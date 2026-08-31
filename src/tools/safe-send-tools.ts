@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccountManager } from '../services/account-manager.js';
 import type { ImapService } from '../services/imap-service.js';
-import { SafeSendService, type SafeSendServiceOptions } from '../services/safe-send-service.js';
+import { SafeSendService, type SafeSendExecutionResult, type SafeSendServiceOptions } from '../services/safe-send-service.js';
 import type { SmtpService } from '../services/smtp-service.js';
 import type { Attachment, EmailAttachment, EmailComposer, EmailContent, ImapAccount } from '../types/index.js';
 import { resolveAttachmentInputPath } from '../utils/attachment-root.js';
@@ -83,21 +83,61 @@ function replyRecipients(originalEmail: EmailContent, account: ImapAccount, repl
   return recipients;
 }
 
-async function saveSentBestEffort(imapService: ImapService, accountId: string, account: ImapAccount, rawMessage: Buffer | string | undefined): Promise<void> {
-  if (!rawMessage || account.saveToSent === false) return;
-  try { await imapService.appendToSentFolder(accountId, rawMessage, account.sentFolder); } catch { /* SMTP is final; never resend due to Sent-copy failure. */ }
+const DEFAULT_SENT_COPY_TIMEOUT_MS = 10_000;
+
+interface SafeSendToolOptions extends Pick<SafeSendServiceOptions, 'clock' | 'id' | 'ttlMs'> {
+  sentCopyTimeoutMs?: number;
 }
 
+async function saveSentBestEffort(
+  imapService: ImapService,
+  accountId: string,
+  account: ImapAccount,
+  rawMessage: Buffer | string | undefined,
+  timeoutMs: number,
+): Promise<SafeSendExecutionResult> {
+  if (!rawMessage || account.saveToSent === false) return {};
+
+  try {
+    const result = await imapService.appendToSentFolder(
+      accountId,
+      rawMessage,
+      account.sentFolder,
+      timeoutMs,
+    );
+    if (result.saved) return {};
+    const timedOut = result.errorCategory === 'timeout';
+    return {
+      warnings: [{
+        code: timedOut ? 'sent_copy_timeout' : 'sent_copy_failed',
+        message: timedOut
+          ? 'Message sent, but saving a Sent-folder copy timed out'
+          : 'Message sent, but saving a Sent-folder copy failed',
+      }],
+    };
+  } catch {
+    return {
+      warnings: [{
+        code: 'sent_copy_failed',
+        message: 'Message sent, but saving a Sent-folder copy failed',
+      }],
+    };
+  }
+}
 function previewResponse(preview: ReturnType<SafeSendService['preview']>) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(preview, null, 2) }] };
 }
 
-export function safeSendTools(server: McpServer, imapService: ImapService, accountManager: AccountManager, smtpService: SmtpService, options: Pick<SafeSendServiceOptions, 'clock' | 'id' | 'ttlMs'> = {}): void {
+export function safeSendTools(server: McpServer, imapService: ImapService, accountManager: AccountManager, smtpService: SmtpService, options: SafeSendToolOptions = {}): void {
+  const sentCopyTimeoutMs = options.sentCopyTimeoutMs ?? DEFAULT_SENT_COPY_TIMEOUT_MS;
+  if (!Number.isFinite(sentCopyTimeoutMs) || sentCopyTimeoutMs <= 0) {
+    throw new Error('Sent-copy timeout must be a positive finite number');
+  }
   const safeSend = new SafeSendService({ ...options, executor: async ({ accountId, composer }) => {
     const account = await accountManager.getAccount(accountId);
     if (!account) throw new Error(`Account ${accountId} not found`);
     const { rawMessage } = await smtpService.sendEmail(accountId, account, composer as EmailComposer);
-    await saveSentBestEffort(imapService, accountId, account, rawMessage);
+    return { secondary: saveSentBestEffort(imapService, accountId, account, rawMessage, sentCopyTimeoutMs) };
   } });
 
   server.registerTool('imap_preview_send_email', {
