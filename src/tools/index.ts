@@ -8,6 +8,8 @@ import { emailTools } from './email-tools.js';
 import { folderTools } from './folder-tools.js';
 import { spamTools } from './spam-tools.js';
 import { safeSendTools } from './safe-send-tools.js';
+import { GmailApiService } from '../services/gmail-api-service.js';
+import { gmailApiTools } from './gmail-api-tools.js';
 
 const BLOCKED_DIRECT_SEND_TOOLS = new Set([
   'imap_send_email',
@@ -24,6 +26,9 @@ const BLOCKED_DIRECT_SEND_TOOLS = new Set([
  * is enabled. Keep this list in sync when adding new read-only tools.
  */
 export const READ_ONLY_TOOLS: readonly string[] = [
+  'gmail_api_list_labels',
+  'gmail_api_search_messages',
+  'gmail_api_get_message',
   // Account (non-mutating)
   'imap_list_accounts',
   'imap_connect',
@@ -49,7 +54,8 @@ export const READ_ONLY_TOOLS: readonly string[] = [
 /** Normalize a configured tool name: lowercase and add the `imap_` prefix if missing. */
 function normalizeToolName(name: string): string {
   const trimmed = name.trim().toLowerCase();
-  return trimmed.startsWith('imap_') ? trimmed : `imap_${trimmed}`;
+  return trimmed.startsWith('imap_') || trimmed.startsWith('gmail_api_')
+    ? trimmed : `imap_${trimmed}`;
 }
 
 /** Parse a comma-separated tool list (forgiving of whitespace, casing, and the `imap_` prefix). */
@@ -135,7 +141,8 @@ export function registerTools(
   imapService: ImapService,
   accountManager: AccountManager,
   smtpService: SmtpService,
-  spamService: SpamService
+  spamService: SpamService,
+  gmailApiService: GmailApiService,
 ): void {
   const enabled = resolveEnabledTools();
 
@@ -153,6 +160,8 @@ export function registerTools(
   emailTools(target, imapService, accountManager, smtpService);
 
   safeSendTools(target, imapService, accountManager, smtpService);
+
+  gmailApiTools(target, accountManager, gmailApiService);
 
   // Register folder operation tools
   folderTools(target, imapService, accountManager);

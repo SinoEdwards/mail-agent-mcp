@@ -264,10 +264,32 @@ describe('runGmailOAuthLoopback', () => {
       error = caught;
     }
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe('Gmail OAuth token exchange request failed');
+    expect((error as Error).message).toBe('Gmail OAuth token exchange request failed (unknown)');
     expect((error as Error).message).not.toMatch(
       /authorization-code|refresh-token|access-token|client-secret/,
     );
+  });
+
+  it.each([
+    ['dns', 'ENOTFOUND'],
+    ['tcp', 'ECONNRESET'],
+    ['tls', 'ERR_TLS_CERT_ALTNAME_INVALID'],
+    ['timeout', 'ETIMEDOUT'],
+  ])('classifies %s token request errors without exposing secrets', async (category, code) => {
+    await expect(runGmailOAuthLoopback({
+      clientId: 'client-id',
+      timeoutMs: 2_000,
+      fetch: async () => {
+        throw Object.assign(new Error('secret provider detail'), { cause: { code } });
+      },
+      openBrowser: async (value) => {
+        const auth = new URL(value);
+        const callback = new URL(auth.searchParams.get('redirect_uri')!);
+        callback.searchParams.set('code', 'authorization-code');
+        callback.searchParams.set('state', auth.searchParams.get('state')!);
+        await fetch(callback);
+      },
+    })).rejects.toThrow('Gmail OAuth token exchange request failed (' + category + ')');
   });
 
   it('times out while waiting for authorization', async () => {

@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- Added three explicit Gmail API read-only tools for labels, message search, and metadata or bounded body reads. Gmail API string IDs remain separate from IMAP UIDs; the new path reuses OAuth and proxy handling without changing send or mailbox-mutation behavior.
+
+### Security
+
+- Updated the MCP SDK, Mailparser, Nodemailer, Undici, Vitest, and affected transitive dependencies. The dependency audit now reports no known vulnerabilities.
+- Removed unused `nodemon` and its vulnerable development dependency chain.
+
+### Maintenance
+
+- Switched SMTP type imports to Nodemailer 10's bundled declarations without changing mail handling.
+- Corrected Dependabot configuration to use GitHub's default labels and removed its stale auto-merge claim.
+- Corrected Gmail repair/proxy guidance and added non-sending SMTP authentication to the provider smoke checklist.
 
 ## [0.1.1] - 2026-08-31
 

@@ -16,6 +16,7 @@ Gmail uses OAuth 2.0; QQ Mail uses provider authorization codes. On Windows, pro
 - Gmail OAuth 2.0 installed-app enrollment with PKCE, state validation, refresh-token support, and sanitized provider errors.
 - QQ Mail IMAP/SMTP enrollment with hidden authorization-code input and rollback-safe credential repair.
 - IMAP search, read, recent mail, folders, flags, keywords, move, guarded delete, drafts, and attachments.
+- Separate read-only Gmail HTTPS API tools for labels, search, metadata, and bounded text/Markdown bodies when Gmail IMAP is unavailable.
 - Four safe-send tools: preview send, reply, forward, then explicit confirmation.
 - Read-only mode and explicit MCP tool allowlists.
 - Attachment path confinement with a configurable local root.
@@ -25,7 +26,7 @@ Gmail uses OAuth 2.0; QQ Mail uses provider authorization codes. On Windows, pro
 
 | Provider | Authentication | Receive | Send | Enrollment |
 | --- | --- | --- | --- | --- |
-| Gmail / Google Workspace | OAuth 2.0 desktop client, PKCE, refresh token | IMAP | SMTP OAuth2 | Windows CLI |
+| Gmail / Google Workspace | OAuth 2.0 desktop client, PKCE, refresh token | Gmail API read-only tools or IMAP | SMTP OAuth2; Sent copy still uses IMAP | Windows CLI |
 | QQ Mail | QQ authorization code | IMAP | SMTP | Windows CLI |
 | Other IMAP/SMTP providers | Legacy password/app-password account path | IMAP | SMTP | Legacy tools/web setup |
 
@@ -33,10 +34,11 @@ The hardened Credential Manager enrollment path is currently Windows-only. Gener
 
 ## MCP tools
 
-The server exposes 41 tools in full mode. The stable public prefix is imap_.
+The server exposes 44 tools in full mode. Existing tools use the `imap_` prefix; the three Gmail HTTPS read tools use `gmail_api_`.
 
 - Accounts: imap_add_account, imap_update_account, imap_list_accounts, imap_remove_account, imap_connect, imap_disconnect, imap_test_account.
 - Read/search: imap_search_emails, imap_get_email, imap_get_latest_emails, imap_find_thread_messages, imap_find_email_by_message_id.
+- Gmail HTTPS read: gmail_api_list_labels, gmail_api_search_messages, gmail_api_get_message. Gmail API string IDs must never be passed as IMAP UIDs. The Gmail API body tool returns bounded text or Markdown, not raw HTML or attachments.
 - Folders and state: imap_list_folders, imap_folder_status, imap_create_folder, imap_get_unread_count, mark/read, flags, keywords, move and guarded delete tools.
 - Attachments and drafts: imap_upload_file, imap_download_attachment, imap_save_draft.
 - Safe sending: imap_preview_send_email, imap_preview_reply_to_email, imap_preview_forward_email, imap_confirm_send.
@@ -160,12 +162,12 @@ Existing process environment values take precedence over values loaded from `.en
 | Variable | Purpose |
 | --- | --- |
 | `IMAP_MCP_ENABLED_TOOLS` | Comma-separated MCP tool allowlist; names may omit the `imap_` prefix. |
-| `IMAP_MCP_READ_ONLY` | Truthy values (`1`, `true`, `yes`, `on`) expose the 16-tool mailbox-read-only subset. |
+| `IMAP_MCP_READ_ONLY` | Truthy values (`1`, `true`, `yes`, `on`) expose the 19-tool mailbox-read-only subset, including three Gmail API tools. |
 | `IMAP_DOWNLOAD_DIR` | Root for uploaded and downloaded attachment files. |
 | `IMAP_MCP_CONFIG_DIR` | Optional account-metadata directory override for isolated profiles and clean-room testing; defaults to `~/.imap-mcp`. |
 | `IMAP_MAX_UPLOAD_SIZE` | Maximum decoded attachment upload size in bytes; default 25 MiB. |
 | `IMAP_UPLOAD_TTL_MS` | Lifetime of uploaded temporary attachment files; default 24 hours. |
-| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | Gmail OAuth/token HTTP proxy settings; lowercase variants are also accepted. |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` | Gmail OAuth/token/API HTTP proxy settings; lowercase variants are also accepted. |
 | `IMAP_MCP_MAIL_PROXY` | Optional explicit HTTP CONNECT, HTTPS, or SOCKS proxy override shared by IMAP and SMTP transports. |
 | `IMAP_SEARCH_FOLDER_TIMEOUT_MS` | Per-folder cross-folder-search deadline; defaults to 10000 ms. |
 | `IMAP_SEARCH_ALL_TIMEOUT_MS` | Overall cross-folder-search deadline, including folder discovery; defaults to 30000 ms. |
@@ -184,7 +186,7 @@ Existing process environment values take precedence over values loaded from `.en
 - accounts.json contains provider/account metadata and credential target references, not those provider secrets.
 - The connected MCP client and model can receive email bodies returned by read tools. Review that client's data policy.
 - Sending is preview-confirmed. Within one running server process, each frozen draft permits at most one send attempt; an ambiguous SMTP outcome is not retried automatically. Draft IDs and state are in memory and do not survive a restart. Delete, move, flag, folder, account, spam-mutation, and draft tools still modify state.
-- Set IMAP_MCP_READ_ONLY=true for a 16-tool mailbox-read-only surface, or IMAP_MCP_ENABLED_TOOLS for an explicit allowlist. This mode is not filesystem-read-only: imap_download_attachment may save a file inside the attachment root.
+- Set IMAP_MCP_READ_ONLY=true for a 19-tool mailbox-read-only surface, or IMAP_MCP_ENABLED_TOOLS for an explicit allowlist. This mode is not filesystem-read-only: imap_download_attachment may save a file inside the attachment root.
 - Attachment paths are confined to IMAP_DOWNLOAD_DIR or, by default, the current user's Downloads/imap-attachments directory.
 - The legacy generic-provider account path may store an AES-encrypted password in ~/.imap-mcp/accounts.json with a colocated local key. This protects against casual plaintext disclosure, not an attacker who can read both files. Use hardened provider enrollment for Gmail and QQ Mail.
 - The server does not intentionally write mail bodies to persistent storage, but pending safe-send content remains in process memory and your MCP client may retain tool results.
@@ -200,11 +202,12 @@ See SECURITY.md for threat boundaries and responsible disclosure.
         v
     MCP tool registry
         |-- AccountManager + credential resolver
+        |-- GmailApiService (HTTPS read-only)
         |-- ImapService / SmtpService
         |-- SafeSendService
         |-- attachment-root boundary
         v
-    Gmail or QQ Mail IMAP/SMTP
+    Gmail API or Gmail/QQ Mail IMAP/SMTP
 
 Configuration metadata lives under ~/.imap-mcp. Provider secrets are resolved into memory only when needed.
 
@@ -214,6 +217,7 @@ Configuration metadata lives under ~/.imap-mcp. Provider secrets are resolved in
 - mail-agent-enroll prompts instead of showing help: rebuild with npm run build.
 - Gmail token endpoint cannot connect: set HTTP_PROXY/HTTPS_PROXY before launching, keep 127.0.0.1 in NO_PROXY, and verify the proxy accepts HTTPS CONNECT.
 - Gmail or QQ IMAP/SMTP cannot connect while OAuth works: set `IMAP_MCP_MAIL_PROXY` to a trusted HTTP CONNECT or SOCKS proxy.
+- Gmail IMAP fails while Gmail API works: use the `gmail_api_*` tools for read-only access. Sending, Sent-folder copy, IMAP mutations, and attachments still depend on their existing transports; do not treat API read success as delivery proof.
 - QQ authentication fails: generate a new authorization code and run qq-repair, adding an account selector when more than one QQ account exists.
 - Gmail authorization or refresh fails: run gmail-repair for the affected account; the command obtains a fresh refresh token through browser OAuth.
 - Credential target mismatch: do not edit accounts.json or reuse another account's target. Re-enroll locally.

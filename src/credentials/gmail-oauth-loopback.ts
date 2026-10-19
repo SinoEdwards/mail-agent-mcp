@@ -1,6 +1,7 @@
 ﻿import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createProxyAwareFetch } from './proxy-fetch.js';
+import { classifyNetworkError } from './network-error.js';
 
 export const GMAIL_OAUTH_SUCCESS_TEXT =
   'Authorization complete. You can close this window.';
@@ -280,10 +281,11 @@ export async function runGmailOAuthLoopback(
           },
         );
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+        const category = classifyNetworkError(error);
+        if (category === 'timeout' && error instanceof Error && error.name === 'AbortError') {
           throw new Error('Gmail OAuth token exchange timed out');
         }
-        throw new Error('Gmail OAuth token exchange request failed');
+        throw new Error('Gmail OAuth token exchange request failed (' + category + ')');
       }
     } finally {
       clearTimeout(tokenTimer);

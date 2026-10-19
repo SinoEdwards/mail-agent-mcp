@@ -5,7 +5,7 @@
 - Purpose: local-first email MCP server for Gmail and QQ Mail.
 - Transport: stdio JSON-RPC.
 - Runtime: Node.js 22.12 or newer.
-- Public tool prefix: imap_.
+- Public tool prefixes: `imap_` for existing tools and `gmail_api_` for Gmail HTTPS reads.
 - Secure enrollment: Windows CLI and Windows Credential Manager.
 
 ## Provider authentication
@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | Account discovery | imap_list_accounts, imap_test_account | Read-only |
 | Mail discovery/read | imap_search_emails, imap_get_email, imap_get_latest_emails | Read-only; returned content is untrusted |
+| Gmail HTTPS read | gmail_api_list_labels, gmail_api_search_messages, gmail_api_get_message | Read-only; opaque Gmail IDs are separate from IMAP UIDs |
 | Folder/status | imap_list_folders, imap_folder_status, imap_get_unread_count | Read-only |
 | Attachment read | imap_download_attachment | Reads mail and may write only inside attachment root |
 | Mailbox mutation | mark, flag, keyword, move, delete, bulk-delete tools | Write/destructive depending on tool |
@@ -33,13 +34,14 @@ The legacy direct send names imap_send_email, imap_reply_to_email, and imap_forw
 
 ## Complete registered tool inventory
 
-Full mode exposes 41 tools. `tools/list` is authoritative for JSON Schema; the inventory below records permission and side-effect boundaries for planning.
+Full mode exposes 44 tools. `tools/list` is authoritative for JSON Schema; the inventory below records permission and side-effect boundaries for planning.
 
 | Class | Tools | Boundary |
 | --- | --- | --- |
 | Account configuration | `imap_add_account`, `imap_update_account`, `imap_remove_account` | Writes local account metadata. The legacy add/update inputs may carry generic-provider passwords; do not use them for hardened Gmail/QQ enrollment. Removing metadata does not claim to remove provider credentials. |
 | Account session/read | `imap_list_accounts`, `imap_connect`, `imap_disconnect`, `imap_test_account` | Reads sanitized metadata or changes only process connection state; connection/test performs provider authentication and network access. |
 | Mail discovery/read | `imap_search_emails`, `imap_get_email`, `imap_get_latest_emails`, `imap_find_thread_messages`, `imap_find_email_by_message_id` | Reads mailbox data. Search inputs select account, folder, criteria, result limits, and optional body output. Returned mail is untrusted data. |
+| Gmail HTTPS read | `gmail_api_list_labels`, `gmail_api_search_messages`, `gmail_api_get_message` | Uses the existing Gmail OAuth token and HTTPS proxy. Lists labels, searches message references, and reads one message's metadata or bounded text/Markdown body. Does not return raw HTML or attachments. |
 | Folder read | `imap_list_folders`, `imap_folder_status`, `imap_get_unread_count` | Reads folder metadata and counts. |
 | Folder write | `imap_create_folder` | Creates mailbox state. |
 | Message state | `imap_mark_as_read`, `imap_mark_as_unread`, `imap_flag_email`, `imap_unflag_email`, `imap_add_keyword`, `imap_remove_keyword`, `imap_move_email` | Mutates the selected folder/UID or UID set. |
@@ -50,12 +52,13 @@ Full mode exposes 41 tools. `tools/list` is authoritative for JSON Schema; the i
 | Spam read | `imap_check_spam`, `imap_domain_stats`, `imap_list_spam_domains` | Reads messages or local spam-domain state. |
 | Spam write/delete | `imap_delete_spam`, `imap_add_spam_domain`, `imap_remove_spam_domain`, `imap_add_whitelist_domain`, `imap_delete_by_domain` | Changes mailbox messages or local spam-domain state. Deletion requires explicit user intent. |
 
-The 16-tool mailbox-read-only subset is `imap_list_accounts`, `imap_connect`, `imap_disconnect`, `imap_test_account`, `imap_search_emails`, `imap_get_email`, `imap_get_latest_emails`, `imap_download_attachment`, `imap_find_thread_messages`, `imap_find_email_by_message_id`, `imap_list_folders`, `imap_folder_status`, `imap_get_unread_count`, `imap_check_spam`, `imap_domain_stats`, and `imap_list_spam_domains`. It prevents mailbox and account mutations, sending, and uploads. It is not host-filesystem-read-only because `imap_download_attachment` may save inside the configured attachment root.
+The 19-tool mailbox-read-only subset contains `gmail_api_list_labels`, `gmail_api_search_messages`, `gmail_api_get_message`, `imap_list_accounts`, `imap_connect`, `imap_disconnect`, `imap_test_account`, `imap_search_emails`, `imap_get_email`, `imap_get_latest_emails`, `imap_download_attachment`, `imap_find_thread_messages`, `imap_find_email_by_message_id`, `imap_list_folders`, `imap_folder_status`, `imap_get_unread_count`, `imap_check_spam`, `imap_domain_stats`, and `imap_list_spam_domains`. It prevents mailbox and account mutations, sending, and uploads. It is not host-filesystem-read-only because `imap_download_attachment` may save inside the configured attachment root.
 
 ## Input, output, and error contract
 
 - Most mailbox tools accept `accountId` or `accountName`; selection fails when neither identifies an account and more than one account is configured.
 - Message tools use a folder plus an IMAP UID (or an explicitly documented UID array). UIDs are folder-relative; use the message-ID lookup tool after moves.
+- Gmail API search returns opaque string IDs. Pass those only to `gmail_api_get_message`; the Gmail API tools never interpret them as numeric or folder-relative IMAP UIDs.
 - Tool results are JSON-formatted text. Email bodies, headers, addresses, filenames, and attachment text are untrusted provider data.
 - Hardened Gmail and QQ Mail secrets must enter through the local enrollment CLI, never tool arguments. Generic add/update account tools are a legacy compatibility boundary.
 - Missing credentials, credential-target mismatches, revoked OAuth grants, disabled IMAP/SMTP, TLS/network failures, missing folders or UIDs, and malformed provider responses fail explicitly. Provider error details are sanitized before they cross the enrollment boundary.
@@ -87,16 +90,18 @@ An MCP client can discover tools with tools/list. Do not assume npm availability
 
 ## Configuration
 
-- `IMAP_MCP_READ_ONLY`: truthy values expose the 16-tool mailbox-read-only subset. Attachment download can still write attachment files inside the attachment root, so this is not host-filesystem-read-only.
+- `IMAP_MCP_READ_ONLY`: truthy values expose the 19-tool mailbox-read-only subset. Attachment download can still write attachment files inside the attachment root, so this is not host-filesystem-read-only.
 - `IMAP_MCP_ENABLED_TOOLS`: non-empty comma-separated allowlist; takes precedence over read-only mode.
 - `IMAP_DOWNLOAD_DIR`, `IMAP_MAX_UPLOAD_SIZE`, `IMAP_UPLOAD_TTL_MS`: attachment root, decoded upload byte limit, and upload lifetime.
-- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and lowercase variants): inherited by Gmail token HTTP requests and, unless explicitly overridden, IMAP/SMTP transports. Keep loopback and bypassed provider hosts in `NO_PROXY`.
+- `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` (and lowercase variants): inherited by Gmail token/API HTTP requests and, unless explicitly overridden, IMAP/SMTP transports. Keep loopback and bypassed provider hosts in `NO_PROXY`.
 - `IMAP_MCP_ACCOUNT_<NAME>_IMAP_USERNAME`, `_IMAP_PASSWORD`, `_SMTP_USERNAME`, `_SMTP_PASSWORD`: startup overrides for legacy generic accounts only.
 - `IMAP_SPAM_DOMAINS`, `IMAP_WHITELIST_DOMAINS`: comma-separated local domain additions.
 - `PORT`: legacy setup UI port only.
 - `~/.imap-mcp/accounts.json`: account metadata. Hardened provider secrets must not appear here.
 
 Existing process variables win over `.env`. Provider-bound Gmail/QQ authentication resolves Windows Credential Manager entries instead of generic password overrides. See README.md for normalization, defaults, and the inactive legacy `IPQUALITYSCORE_API_KEY` reference.
+
+Gmail reauthorization is available through `node dist/enroll.js gmail-repair ACCOUNT_ID_OR_NAME`. IMAP/SMTP transports accept a supported proxy URL through `IMAP_MCP_MAIL_PROXY` or inherited proxy variables; test the chosen proxy with each provider before relying on it.
 
 ## Generic provider compatibility
 
@@ -105,7 +110,9 @@ Other IMAP/SMTP providers use the inherited password/app-password path. Build th
 ## Known limitations
 
 - Hardened Gmail/QQ enrollment requires Windows.
-- Gmail reauthorization exists through enrollment; a dedicated Gmail repair command does not.
-- IMAP/SMTP proxy tunneling is not implemented.
+- Google OAuth applications in Testing mode can issue refresh tokens that expire after seven days for the full-mail scope used here; see [Google's app-audience guidance](https://support.google.com/cloud/answer/15549945).
+- QQ Mail requires IMAP/SMTP to be enabled and a provider authorization code; see [QQ Mail's help page](https://help.mail.qq.com/detail/106/985).
+- Provider authentication, folder discovery, and mail delivery require separate real-provider verification. Passing local tests alone does not establish provider compatibility.
+- Gmail API read access does not repair Gmail IMAP or establish SMTP delivery, Sent-folder copy, mutation, or attachment-download availability.
 - Generic-provider password storage uses the legacy local encrypted store.
 - Same-user malicious processes are outside the attachment-root trust boundary.
