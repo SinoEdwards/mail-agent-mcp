@@ -218,6 +218,7 @@ Configuration metadata lives under ~/.imap-mcp. Provider secrets are resolved in
 - Gmail token endpoint cannot connect: set HTTP_PROXY/HTTPS_PROXY before launching, keep 127.0.0.1 in NO_PROXY, and verify the proxy accepts HTTPS CONNECT.
 - Gmail or QQ IMAP/SMTP cannot connect while OAuth works: set `IMAP_MCP_MAIL_PROXY` to a trusted HTTP CONNECT or SOCKS proxy.
 - Gmail IMAP fails while Gmail API works: use Gmail API tools to read messages and download bounded attachments. Gmail API reply/forward previews can freeze a draft, but sending still requires SMTP and a separate `imap_confirm_send` confirmation. Gmail SMTP normally places its own Sent copy; the server skips a second IMAP append unless `saveToSent` is explicitly true. API read success is not delivery proof.
+- IMAP From/To/Subject search returns no match even though a recent message exists: the server checks message headers locally for metadata-only searches when the folder has at most 500 messages. Larger folders and body searches still depend on the provider's SEARCH behavior; use a recent-mail listing to cross-check an unexpected empty result.
 - QQ authentication fails: generate a new authorization code and run qq-repair, adding an account selector when more than one QQ account exists.
 - Gmail authorization or refresh fails: run gmail-repair for the affected account; the command obtains a fresh refresh token through browser OAuth.
 - Credential target mismatch: do not edit accounts.json or reuse another account's target. Re-enroll locally.

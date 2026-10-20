@@ -411,10 +411,17 @@ export class ImapService {
 
       const searchQuery = this.buildSearchQuery(criteria);
       const uids = await client.search(searchQuery, { uid: true });
-
-      if (!uids || uids.length === 0) {
-        return [];
-      }
+      // Some providers return an empty header SEARCH even though the mailbox
+      // contains matching messages. For a small mailbox, verify an empty
+      // metadata-only From/To/Subject search against envelopes.
+      const keys = Object.entries(criteria)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .map(([key]) => key);
+      const mailboxSize = Number(client.mailbox ? client.mailbox.exists : NaN);
+      const verifyHeaders = !includeBody && (!uids || uids.length === 0)
+        && keys.length > 0 && keys.every(key => ['from', 'to', 'subject'].includes(key))
+        && Number.isSafeInteger(mailboxSize) && mailboxSize > 0 && mailboxSize <= 500;
+      if ((!uids || uids.length === 0) && !verifyHeaders) return [];
 
       // Fetch envelopes + flags + internalDate, and — when includeBody — the
       // RFC822 source in the same round-trip (one `client.fetch` call).
@@ -430,7 +437,19 @@ export class ImapService {
 
       const messages: EmailMessage[] = [];
 
-      for await (const msg of client.fetch(uids, fetchQuery, { uid: true })) {
+      const fetchTarget = verifyHeaders ? `1:${mailboxSize}` : (uids || []);
+      const fetchOptions = verifyHeaders ? {} : { uid: true };
+      for await (const msg of client.fetch(fetchTarget, fetchQuery, fetchOptions)) {
+        if (verifyHeaders) {
+          const contains = (value: string, query: string | undefined) => !query
+            || value.toLowerCase().includes(query.toLowerCase());
+          const envelope = msg.envelope;
+          if (!contains(envelope?.subject || '', criteria.subject)
+            || !contains((envelope?.from || []).map((address: any) => this.formatAddress(address)).join(', '), criteria.from)
+            || !contains((envelope?.to || []).map((address: any) => this.formatAddress(address)).join(', '), criteria.to)) {
+            continue;
+          }
+        }
         const flags = Array.from(msg.flags || []) as string[];
         const base: EmailMessage = {
           uid: msg.uid,

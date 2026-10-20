@@ -113,6 +113,7 @@ Other IMAP/SMTP providers use the inherited password/app-password path. Build th
 - Google OAuth applications in Testing mode can issue refresh tokens that expire after seven days for the full-mail scope used here; see [Google's app-audience guidance](https://support.google.com/cloud/answer/15549945).
 - QQ Mail requires IMAP/SMTP to be enabled and a provider authorization code; see [QQ Mail's help page](https://help.mail.qq.com/detail/106/985).
 - Provider authentication, folder discovery, and mail delivery require separate real-provider verification. Passing local tests alone does not establish provider compatibility.
+- Some IMAP servers return an empty From/To/Subject search despite matching mail. A metadata-only search now verifies envelopes locally when that folder has at most 500 messages. Larger folders and body searches still rely on the provider's SEARCH response and may require another read path.
 - Gmail API read access does not repair Gmail IMAP or establish SMTP delivery or mailbox mutation. Gmail API attachment download and reply/forward previews require separate provider verification; preview alone does not send.
 - Generic-provider password storage uses the legacy local encrypted store.
 - Same-user malicious processes are outside the attachment-root trust boundary.

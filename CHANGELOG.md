@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the MCP SDK, Mailparser, Nodemailer, Undici, Vitest, and affected transitive dependencies. The dependency audit now reports no known vulnerabilities.
 - Removed unused `nodemon` and its vulnerable development dependency chain.
 
+### Fixed
+
+- When a provider returns no results for a metadata-only From/To/Subject IMAP search, verify headers locally for mailboxes of at most 500 messages. This addresses a QQ Sent-folder case where server-side subject search returned empty while the message was present; message bodies are never fetched by the fallback.
+
 ### Maintenance
 
 - Switched SMTP type imports to Nodemailer 10's bundled declarations without changing mail handling.
