@@ -260,4 +260,42 @@ describe('safe-send MCP tools', () => {
     expect(JSON.stringify(result)).not.toContain('provider detail');
     expect(smtpService.sendEmail).toHaveBeenCalledTimes(1);
   });
+
+  it('warns after SMTP success when a required Sent copy cannot be composed', async () => {
+    const { handlers, smtpService, imapService } = harness();
+    smtpService.sendEmail.mockResolvedValueOnce({ messageId: '<id@example.com>' } as any);
+    const preview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'copy unavailable', text: 'body',
+    }));
+    const result = json(await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true }));
+    expect(result).toEqual({
+      status: 'sent',
+      warnings: [{ code: 'sent_copy_failed', message: 'Message sent, but saving a Sent-folder copy failed' }],
+    });
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true })))
+      .toEqual({ status: 'already_sent' });
+    expect(smtpService.sendEmail).toHaveBeenCalledTimes(1);
+    expect(imapService.appendToSentFolder).not.toHaveBeenCalled();
+  });
+
+  it('does not warn about an absent raw copy when Sent append is disabled', async () => {
+    const { handlers, account, smtpService, imapService } = harness();
+    smtpService.sendEmail.mockResolvedValue({ messageId: '<id@example.com>' } as any);
+    (account as any).auth = { kind: 'oauth2', provider: 'gmail' };
+    const gmailPreview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'gmail auto-saved', text: 'body',
+    }));
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: gmailPreview.draftId, confirmed: true })))
+      .toEqual({ status: 'sent' });
+
+    delete (account as any).auth;
+    (account as any).saveToSent = false;
+    const disabledPreview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'copy disabled', text: 'body',
+    }));
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: disabledPreview.draftId, confirmed: true })))
+      .toEqual({ status: 'sent' });
+    expect(smtpService.sendEmail).toHaveBeenCalledTimes(2);
+    expect(imapService.appendToSentFolder).not.toHaveBeenCalled();
+  });
 });

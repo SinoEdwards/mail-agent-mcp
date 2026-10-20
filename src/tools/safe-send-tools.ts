@@ -111,8 +111,17 @@ async function saveSentBestEffort(
   // Gmail saves messages submitted through its SMTP server in Sent itself.
   // Avoid a second IMAP append by default, especially when its IMAP route is
   // unavailable. An explicit saveToSent=true keeps the opt-in override.
-  if (!rawMessage || account.saveToSent === false
+  if (account.saveToSent === false
     || (account.auth?.provider === 'gmail' && account.saveToSent !== true)) return {};
+
+  if (!rawMessage) {
+    return {
+      warnings: [{
+        code: 'sent_copy_failed',
+        message: 'Message sent, but saving a Sent-folder copy failed',
+      }],
+    };
+  }
 
   try {
     const result = await imapService.appendToSentFolder(
