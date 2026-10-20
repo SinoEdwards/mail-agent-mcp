@@ -104,6 +104,65 @@ describe('GmailApiService', () => {
       .resolves.toMatchObject({ body: 'café', bodyFormat: 'text' });
   });
 
+  it('lists attachment metadata and retrieves only a selected bounded part', async () => {
+    const encoded = Buffer.from('safe synthetic bytes').toString('base64url');
+    const { service } = setup(url => {
+      if (url.pathname.endsWith('/attachments/attachment_2')) {
+        return Response.json({ size: 20, data: encoded });
+      }
+      expect(url.searchParams.get('format')).toBe('full');
+      return Response.json({ id: 'abc123', payload: { parts: [
+        { partId: '1', filename: '', mimeType: 'text/plain', body: { size: 4, data: 'dGVzdA' } },
+        { partId: '2', filename: '../safe.txt', mimeType: 'text/plain',
+          headers: [{ name: 'Content-ID', value: '<cid-1>' }],
+          body: { size: 20, attachmentId: 'attachment_2' } },
+      ] } });
+    });
+    await expect(service.listAttachments(gmail, 'abc123')).resolves.toEqual([
+      { partId: '2', filename: '../safe.txt', mimeType: 'text/plain', size: 20, contentId: 'cid-1' },
+    ]);
+    const attachment = await service.getAttachment(gmail, 'abc123', '2');
+    expect(attachment.content.toString()).toBe('safe synthetic bytes');
+    expect(attachment.partId).toBe('2');
+    await expect(service.getAttachment(gmail, 'abc123', 'missing')).rejects.toThrow('part not found');
+    await expect(service.getAttachment(gmail, 'abc123', '2', 3)).rejects.toThrow('exceeds size limit');
+  });
+
+  it('decodes inline attachment data and rejects malformed encodings', async () => {
+    const inline = setup(() => Response.json({ id: 'abc123', payload: { parts: [
+      { partId: '0', filename: 'inline.bin', mimeType: 'application/octet-stream',
+        body: { size: 4, data: Buffer.from('safe').toString('base64url') } },
+    ] } }));
+    await expect(inline.service.getAttachment(gmail, 'abc123', '0'))
+      .resolves.toMatchObject({ filename: 'inline.bin', content: Buffer.from('safe') });
+    const invalid = setup(() => Response.json({ id: 'abc123', payload: { parts: [
+      { partId: '0', filename: 'bad.bin', body: { size: 4, data: '%%%invalid' } },
+    ] } }));
+    await expect(invalid.service.getAttachment(gmail, 'abc123', '0'))
+      .rejects.toThrow('invalid attachment encoding');
+    const mismatched = setup(() => Response.json({ id: 'abc123', payload: { parts: [
+      { partId: '0', filename: 'bad.bin', body: { size: 5, data: Buffer.from('safe').toString('base64url') } },
+    ] } }));
+    await expect(mismatched.service.getAttachment(gmail, 'abc123', '0'))
+      .rejects.toThrow('size does not match');
+  });
+
+  it('preserves reply headers in metadata without reading a body', async () => {
+    const { service } = setup(() => Response.json({ id: 'abc123', threadId: 'thread123', payload: {
+      headers: [
+        { name: 'From', value: 'Sender <sender@example.test>' },
+        { name: 'Reply-To', value: 'Replies <reply@example.test>' },
+        { name: 'Message-ID', value: '<synthetic@example.test>' },
+        { name: 'References', value: '<earlier@example.test>' },
+      ],
+    } }));
+    await expect(service.getMessage(gmail, 'abc123')).resolves.toMatchObject({
+      replyTo: 'Replies <reply@example.test>',
+      messageIdHeader: '<synthetic@example.test>',
+      references: '<earlier@example.test>',
+    });
+  });
+
   it('rejects non-Gmail accounts before authentication or transport', async () => {
     const { service, fetchMock, authResolver } = setup(() => Response.json({}));
     await expect(service.listLabels({ ...gmail, auth: { kind: 'credential', provider: 'qq', credentialTarget: 'qq' } }))

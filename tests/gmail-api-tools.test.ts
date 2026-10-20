@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { gmailApiTools } from '../src/tools/gmail-api-tools.js';
 
-function setup(provider: 'gmail' | 'qq' = 'gmail') {
+function setup(provider: 'gmail' | 'qq' = 'gmail', downloadDir?: string) {
   const handlers = new Map<string, (input: any) => Promise<any>>();
   const server = {
     registerTool: vi.fn((name: string, _schema: unknown, handler: (input: any) => Promise<any>) => {
@@ -19,19 +22,49 @@ function setup(provider: 'gmail' | 'qq' = 'gmail') {
     listLabels: vi.fn().mockResolvedValue([{ id: 'INBOX', name: 'Inbox' }]),
     searchMessages: vi.fn().mockResolvedValue({ messages: [{ id: 'abc123', threadId: 'thread123' }] }),
     getMessage: vi.fn().mockResolvedValue({ id: 'abc123', threadId: 'thread123', labelIds: [] }),
+    listAttachments: vi.fn().mockResolvedValue([{ partId: '2', filename: 'safe.txt', mimeType: 'text/plain', size: 4 }]),
+    getAttachment: vi.fn().mockResolvedValue({ partId: '2', filename: 'safe.txt', mimeType: 'text/plain', size: 4, content: Buffer.from('safe') }),
   };
-  gmailApiTools(server as any, accounts as any, gmailApi as any);
+  gmailApiTools(server as any, accounts as any, gmailApi as any, { downloadDir });
   return { handlers, gmailApi, account };
 }
 
 describe('Gmail API MCP tools', () => {
-  it('registers only the three explicit Gmail API read tools', () => {
+  it('registers only the explicit Gmail API read and bounded download tools', () => {
     const { handlers } = setup();
     expect([...handlers.keys()]).toEqual([
       'gmail_api_list_labels',
       'gmail_api_search_messages',
       'gmail_api_get_message',
+      'gmail_api_list_attachments',
+      'gmail_api_download_attachment',
     ]);
+  });
+
+  it('lists metadata and saves a bounded attachment only inside the configured root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mailagent-gmail-tool-'));
+    try {
+      const { handlers, gmailApi, account } = setup('gmail', root);
+      const listed = await handlers.get('gmail_api_list_attachments')!({ accountId: 'account-1', messageId: 'abc123' });
+      expect(JSON.parse(listed.content[0].text).attachments).toHaveLength(1);
+      expect(gmailApi.listAttachments).toHaveBeenCalledWith(account, 'abc123');
+      const saved = await handlers.get('gmail_api_download_attachment')!({
+        accountId: 'account-1', messageId: 'abc123', partId: '2',
+      });
+      expect(JSON.parse(saved.content[0].text)).toMatchObject({ saved: true, savedAs: 'safe.txt', size: 4 });
+      expect(await readFile(join(root, 'safe.txt'), 'utf8')).toBe('safe');
+      await expect(handlers.get('gmail_api_download_attachment')!({
+        accountId: 'account-1', messageId: 'abc123', partId: '2',
+      })).rejects.toThrow();
+      await expect(handlers.get('gmail_api_download_attachment')!({
+        accountId: 'account-1', messageId: 'abc123', partId: '2', savePath: '../outside.txt',
+      })).rejects.toThrow('Attachment path must stay inside');
+    } finally {
+      if (!resolve(root).startsWith(resolve(tmpdir()) + '\\') && !resolve(root).startsWith(resolve(tmpdir()) + '/')) {
+        throw new Error('Refusing to remove a directory outside the temporary root');
+      }
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('passes account and Gmail ID to the right service without an IMAP UID', async () => {

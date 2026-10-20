@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added three explicit Gmail API read-only tools for labels, message search, and metadata or bounded body reads. Gmail API string IDs remain separate from IMAP UIDs; the new path reuses OAuth and proxy handling without changing send or mailbox-mutation behavior.
+- Added Gmail API attachment listing and bounded download into the configured attachment root, plus API-ID reply and forward previews that use the existing frozen-draft confirmation gate. Gmail SMTP now relies on Gmail's own Sent copy by default; an explicit `saveToSent=true` retains IMAP append.
 
 ### Security
 

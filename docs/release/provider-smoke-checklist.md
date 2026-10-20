@@ -24,8 +24,8 @@ Run this manually from a fresh Windows user profile or isolated HOME. Existing C
 - [ ] accounts.json contains only metadata and MailAgentMCP target references.
 - [ ] Windows Credential Manager contains separate refresh-token and client-secret entries.
 - [ ] Restart the process and authenticate through refresh-token exchange.
-- [ ] Verify the Gmail API is enabled in the OAuth project and `gmail_api_list_labels`, `gmail_api_search_messages`, and metadata-only `gmail_api_get_message` succeed in a read-only MCP session; record counts and status only.
-- [ ] Confirm Gmail API string message IDs are used only by `gmail_api_get_message`, never passed to an IMAP UID tool.
+- [ ] Verify the Gmail API is enabled in the OAuth project and `gmail_api_list_labels`, `gmail_api_search_messages`, metadata-only `gmail_api_get_message`, and `gmail_api_list_attachments` succeed in a read-only MCP session; record counts and status only. Do not download a real attachment during this metadata smoke check.
+- [ ] Confirm Gmail API string message IDs are used only by Gmail API tools, never passed to an IMAP UID tool.
 - [ ] Authenticate to SMTP without submitting a message; record only PASS/FAIL.
 - [ ] list folders succeeds.
 - [ ] search metadata with limit 1 succeeds without reading a body or changing Seen.

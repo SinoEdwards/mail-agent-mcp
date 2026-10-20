@@ -29,6 +29,8 @@ export const READ_ONLY_TOOLS: readonly string[] = [
   'gmail_api_list_labels',
   'gmail_api_search_messages',
   'gmail_api_get_message',
+  'gmail_api_list_attachments',
+  'gmail_api_download_attachment',
   // Account (non-mutating)
   'imap_list_accounts',
   'imap_connect',
@@ -159,7 +161,7 @@ export function registerTools(
   // Register email operation tools
   emailTools(target, imapService, accountManager, smtpService);
 
-  safeSendTools(target, imapService, accountManager, smtpService);
+  safeSendTools(target, imapService, accountManager, smtpService, { gmailApiService });
 
   gmailApiTools(target, accountManager, gmailApiService);
 

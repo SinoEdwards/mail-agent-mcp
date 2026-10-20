@@ -9,6 +9,7 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_BODY_CHARS = 10_000;
 const MAX_BODY_CHARS = 20_000;
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MESSAGE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 type JsonRecord = Record<string, unknown>;
@@ -70,9 +71,25 @@ export interface GmailApiMessage extends GmailApiMessageReference {
   to?: string;
   subject?: string;
   date?: string;
+  cc?: string;
+  replyTo?: string;
+  messageIdHeader?: string;
+  references?: string;
   body?: string;
   bodyFormat?: 'text' | 'markdown';
   bodyTruncated?: boolean;
+}
+
+export interface GmailApiAttachment {
+  partId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  contentId?: string;
+}
+
+export interface GmailApiAttachmentContent extends GmailApiAttachment {
+  content: Buffer;
 }
 
 export interface GmailApiServiceOptions {
@@ -89,11 +106,58 @@ function headersOf(payload: JsonRecord): Record<string, string> {
       throw new Error('Gmail API returned invalid message headers');
     }
     const name = item.name.toLowerCase();
-    if (['from', 'to', 'subject', 'date'].includes(name) && headers[name] === undefined) {
+    if (['from', 'to', 'subject', 'date', 'cc', 'reply-to', 'message-id', 'references'].includes(name)
+      && headers[name] === undefined) {
       headers[name] = item.value;
     }
   }
   return headers;
+}
+
+function attachmentParts(payload: JsonRecord): Array<{ metadata: GmailApiAttachment; body: JsonRecord }> {
+  const found: Array<{ metadata: GmailApiAttachment; body: JsonRecord }> = [];
+  function visit(part: JsonRecord, depth: number): void {
+    if (depth > 30) throw new Error('Gmail API message nesting too deep');
+    if (requiredString(part.filename)) {
+      if (!requiredString(part.partId) || !record(part.body)
+        || !Number.isSafeInteger(part.body.size) || (part.body.size as number) < 0) {
+        throw new Error('Gmail API returned invalid attachment metadata');
+      }
+      const headers = Array.isArray(part.headers) ? part.headers : [];
+      const cid = headers.find((header: unknown) => record(header)
+        && typeof header.name === 'string' && header.name.toLowerCase() === 'content-id');
+      found.push({
+        metadata: {
+          partId: part.partId,
+          filename: part.filename,
+          mimeType: typeof part.mimeType === 'string' ? part.mimeType : 'application/octet-stream',
+          size: part.body.size as number,
+          ...(record(cid) && requiredString(cid.value) ? { contentId: cid.value.replace(/^<|>$/g, '') } : {}),
+        },
+        body: part.body,
+      });
+    }
+    if (part.parts !== undefined) {
+      if (!Array.isArray(part.parts)) throw new Error('Gmail API returned invalid message parts');
+      for (const child of part.parts) {
+        if (!record(child)) throw new Error('Gmail API returned invalid message parts');
+        visit(child, depth + 1);
+      }
+    }
+  }
+  visit(payload, 0);
+  return found;
+}
+
+function decodeAttachment(data: unknown, maxBytes: number): Buffer {
+  if (typeof data !== 'string' || !/^[A-Za-z0-9_-]*={0,2}$/.test(data)
+    || data.length % 4 === 1) throw new Error('Gmail API returned invalid attachment encoding');
+  const content = Buffer.from(data, 'base64url');
+  if (content.length > maxBytes) throw new Error('Gmail API attachment exceeds size limit');
+  if (content.toString('base64url') !== data.replace(/=+$/u, '')) {
+    throw new Error('Gmail API returned invalid attachment encoding');
+  }
+  return content;
 }
 
 function collectBodyParts(part: JsonRecord, plain: string[], html: string[], depth = 0): void {
@@ -225,7 +289,9 @@ export class GmailApiService {
     }
     const params = new URLSearchParams({ format: options.includeBody ? 'full' : 'metadata' });
     if (!options.includeBody) {
-      for (const header of ['From', 'To', 'Subject', 'Date']) params.append('metadataHeaders', header);
+      for (const header of ['From', 'To', 'Cc', 'Subject', 'Date', 'Reply-To', 'Message-ID', 'References']) {
+        params.append('metadataHeaders', header);
+      }
     }
     const data = await this.request(account, 'messages/' + encodeURIComponent(messageId) + '?' + params);
     if (!record(data) || !requiredString(data.id) || !requiredString(data.threadId)
@@ -243,6 +309,10 @@ export class GmailApiService {
       ...(headers.to ? { to: headers.to } : {}),
       ...(headers.subject ? { subject: headers.subject } : {}),
       ...(headers.date ? { date: headers.date } : {}),
+      ...(headers.cc ? { cc: headers.cc } : {}),
+      ...(headers['reply-to'] ? { replyTo: headers['reply-to'] } : {}),
+      ...(headers['message-id'] ? { messageIdHeader: headers['message-id'] } : {}),
+      ...(headers.references ? { references: headers.references } : {}),
     };
     if (options.includeBody) {
       const plain: string[] = [];
@@ -255,5 +325,51 @@ export class GmailApiService {
       result.bodyTruncated = body.length > maxBodyChars;
     }
     return result;
+  }
+
+  private async fullPayload(account: ImapAccount, messageId: string): Promise<JsonRecord> {
+    if (!MESSAGE_ID.test(messageId)) throw new Error('Invalid Gmail message ID');
+    const data = await this.request(account, 'messages/' + encodeURIComponent(messageId) + '?format=full');
+    if (!record(data) || data.id !== messageId || !record(data.payload)) {
+      throw new Error('Gmail API returned invalid message');
+    }
+    return data.payload;
+  }
+
+  async listAttachments(account: ImapAccount, messageId: string): Promise<GmailApiAttachment[]> {
+    return attachmentParts(await this.fullPayload(account, messageId)).map(part => part.metadata);
+  }
+
+  async getAttachment(
+    account: ImapAccount,
+    messageId: string,
+    partId: string,
+    maxBytes = MAX_ATTACHMENT_BYTES,
+  ): Promise<GmailApiAttachmentContent> {
+    if (!partId || partId.length > 128 || /[\u0000-\u001f\u007f]/u.test(partId)) {
+      throw new Error('Invalid Gmail attachment part ID');
+    }
+    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_ATTACHMENT_BYTES) {
+      throw new Error('Gmail API attachment size limit must be between 1 and 5242880 bytes');
+    }
+    const part = attachmentParts(await this.fullPayload(account, messageId))
+      .find(item => item.metadata.partId === partId);
+    if (!part) throw new Error('Gmail API attachment part not found');
+    if (part.metadata.size > maxBytes) throw new Error('Gmail API attachment exceeds size limit');
+    let body = part.body;
+    if (requiredString(body.attachmentId)) {
+      if (body.attachmentId.length > 2048 || /[\u0000-\u001f\u007f]/u.test(body.attachmentId)) {
+        throw new Error('Gmail API returned invalid attachment ID');
+      }
+      const data = await this.request(account, 'messages/' + encodeURIComponent(messageId)
+        + '/attachments/' + encodeURIComponent(body.attachmentId));
+      if (!record(data)) throw new Error('Gmail API returned invalid attachment');
+      body = data;
+    }
+    const content = decodeAttachment(body.data, maxBytes);
+    if (content.length !== part.metadata.size) {
+      throw new Error('Gmail API attachment size does not match message metadata');
+    }
+    return { ...part.metadata, content };
   }
 }

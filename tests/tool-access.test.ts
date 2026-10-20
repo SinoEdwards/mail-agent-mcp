@@ -125,6 +125,10 @@ describe('READ_ONLY_TOOLS subset', () => {
     expect(READ_ONLY_TOOLS).toContain('gmail_api_list_labels');
     expect(READ_ONLY_TOOLS).toContain('gmail_api_search_messages');
     expect(READ_ONLY_TOOLS).toContain('gmail_api_get_message');
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_list_attachments');
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_download_attachment');
+    expect(READ_ONLY_TOOLS).not.toContain('gmail_api_preview_reply_to_message');
+    expect(READ_ONLY_TOOLS).not.toContain('gmail_api_preview_forward_message');
     expect(READ_ONLY_TOOLS).toContain('imap_search_emails');
     expect(READ_ONLY_TOOLS).toContain('imap_get_email');
     expect(READ_ONLY_TOOLS).toContain('imap_list_folders');
@@ -145,8 +149,7 @@ describe('registerTools gating', () => {
 
   it('keeps legacy direct-send tools hidden while exposing safe-send and save-draft when unrestricted', () => {
     const names = registeredToolsFor({});
-    // Sanity: the full surface is large and includes destructive tools.
-    expect(names.length).toBeGreaterThan(READ_ONLY_TOOLS.length);
+    expect(names).toHaveLength(48);
     expect(names).toContain('imap_delete_email');
     expect(names).not.toContain('imap_send_email');
     expect(names).not.toContain('imap_reply_to_email');
@@ -154,6 +157,8 @@ describe('registerTools gating', () => {
     expect(names).toContain('imap_preview_send_email');
     expect(names).toContain('imap_preview_reply_to_email');
     expect(names).toContain('imap_preview_forward_email');
+    expect(names).toContain('gmail_api_preview_reply_to_message');
+    expect(names).toContain('gmail_api_preview_forward_message');
     expect(names).toContain('imap_confirm_send');
     expect(names).toContain('imap_save_draft');
   });
@@ -177,6 +182,7 @@ describe('registerTools gating', () => {
 
   it('registers only the read-only subset in read-only mode', () => {
     const names = registeredToolsFor({ IMAP_MCP_READ_ONLY: 'true' });
+    expect(names).toHaveLength(21);
     expect(new Set(names)).toEqual(new Set(READ_ONLY_TOOLS));
     for (const tool of DESTRUCTIVE_TOOLS) {
       expect(names).not.toContain(tool);

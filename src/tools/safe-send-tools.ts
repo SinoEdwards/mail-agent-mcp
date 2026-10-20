@@ -2,11 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { simpleParser } from 'mailparser';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AccountManager } from '../services/account-manager.js';
 import type { ImapService } from '../services/imap-service.js';
 import { SafeSendService, type SafeSendExecutionResult, type SafeSendServiceOptions } from '../services/safe-send-service.js';
 import type { SmtpService } from '../services/smtp-service.js';
+import type { GmailApiService } from '../services/gmail-api-service.js';
 import type { Attachment, EmailAttachment, EmailComposer, EmailContent, ImapAccount } from '../types/index.js';
 import { resolveAttachmentInputPath } from '../utils/attachment-root.js';
 
@@ -66,7 +68,7 @@ function extractEmail(address: string): string {
   return (match ? match[1] : address).trim().toLowerCase();
 }
 
-function replyRecipients(originalEmail: EmailContent, account: ImapAccount, replyAll: boolean): string[] {
+function replyRecipients(originalEmail: Pick<EmailContent, 'from' | 'to'>, account: ImapAccount, replyAll: boolean): string[] {
   const recipients = [originalEmail.from];
   if (!replyAll) return recipients;
   const seen = new Set<string>([
@@ -83,10 +85,20 @@ function replyRecipients(originalEmail: EmailContent, account: ImapAccount, repl
   return recipients;
 }
 
+async function parseHeaderAddresses(header: string | undefined): Promise<string[]> {
+  if (!header) return [];
+  const parsed = await simpleParser('To: ' + header.replace(/[\r\n]+/gu, ' ') + '\r\n\r\n', {
+    skipHtmlToText: true,
+  });
+  const values = parsed.to ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to]) : [];
+  return values.flatMap(value => value.value.map(address => address.address).filter((address): address is string => !!address));
+}
+
 const DEFAULT_SENT_COPY_TIMEOUT_MS = 10_000;
 
 interface SafeSendToolOptions extends Pick<SafeSendServiceOptions, 'clock' | 'id' | 'ttlMs'> {
   sentCopyTimeoutMs?: number;
+  gmailApiService?: GmailApiService;
 }
 
 async function saveSentBestEffort(
@@ -96,7 +108,11 @@ async function saveSentBestEffort(
   rawMessage: Buffer | string | undefined,
   timeoutMs: number,
 ): Promise<SafeSendExecutionResult> {
-  if (!rawMessage || account.saveToSent === false) return {};
+  // Gmail saves messages submitted through its SMTP server in Sent itself.
+  // Avoid a second IMAP append by default, especially when its IMAP route is
+  // unavailable. An explicit saveToSent=true keeps the opt-in override.
+  if (!rawMessage || account.saveToSent === false
+    || (account.auth?.provider === 'gmail' && account.saveToSent !== true)) return {};
 
   try {
     const result = await imapService.appendToSentFolder(
@@ -229,6 +245,98 @@ export function safeSendTools(server: McpServer, imapService: ImapService, accou
     };
     return previewResponse(safeSend.preview({ accountId, composer }));
   });
+
+  if (options.gmailApiService) {
+    const gmailApi = options.gmailApiService;
+    async function selectedGmail(rawAccountId?: string, accountName?: string): Promise<{ accountId: string; account: ImapAccount }> {
+      const accountId = accountManager.resolveAccountId(rawAccountId, accountName);
+      const account = await accountManager.getAccount(accountId);
+      if (!account || account.auth?.kind !== 'oauth2' || account.auth.provider !== 'gmail') {
+        throw new Error('Select an enrolled Gmail OAuth account');
+      }
+      return { accountId, account };
+    }
+
+    server.registerTool('gmail_api_preview_reply_to_message', {
+      description: 'Preview and freeze a Gmail reply by Gmail API message ID without IMAP. This does not send; use imap_confirm_send with the returned draft ID after explicit approval.',
+      inputSchema: {
+        accountId: z.string().optional(),
+        accountName: z.string().optional(),
+        messageId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+        text: z.string().optional(),
+        html: z.string().optional(),
+        replyAll: z.boolean().default(false),
+        bcc: addressList.optional(),
+        attachments: z.array(attachmentSchema).optional(),
+      },
+    }, async ({ accountId: rawAccountId, accountName, messageId, text, html, replyAll, bcc, attachments }) => {
+      const { accountId, account } = await selectedGmail(rawAccountId, accountName);
+      const original = await gmailApi.getMessage(account, messageId);
+      if (!original.from || !original.messageIdHeader) throw new Error('Gmail message lacks reply headers');
+      const replyTargets = await parseHeaderAddresses(original.replyTo || original.from);
+      if (replyTargets.length === 0) throw new Error('Gmail message lacks a valid reply address');
+      const recipients = replyRecipients({
+        from: replyTargets[0],
+        to: await parseHeaderAddresses(original.to),
+      }, account, replyAll);
+      const composer: EmailComposer = {
+        from: account.email || account.user,
+        to: recipients,
+        subject: /^Re:/iu.test(original.subject || '') ? original.subject! : 'Re: ' + (original.subject || ''),
+        text,
+        html,
+        bcc: mergeBcc(account.defaultBcc, bcc),
+        inReplyTo: original.messageIdHeader,
+        references: [original.references, original.messageIdHeader].filter(Boolean).join(' '),
+        attachments: await materializeAttachments(attachments),
+      };
+      return previewResponse(safeSend.preview({ accountId, composer }));
+    });
+
+    server.registerTool('gmail_api_preview_forward_message', {
+      description: 'Preview and freeze a Gmail forward by Gmail API message ID without IMAP. Bounded original content and attachments are materialized before preview; confirmation is a separate tool call.',
+      inputSchema: {
+        accountId: z.string().optional(),
+        accountName: z.string().optional(),
+        messageId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+        to: addressList,
+        text: z.string().optional(),
+        bcc: addressList.optional(),
+        includeAttachments: z.boolean().default(true),
+      },
+    }, async ({ accountId: rawAccountId, accountName, messageId, to, text, bcc, includeAttachments }) => {
+      const { accountId, account } = await selectedGmail(rawAccountId, accountName);
+      const original = await gmailApi.getMessage(account, messageId, { includeBody: true, maxBodyChars: 20_000 });
+      if (original.bodyTruncated) throw new Error('Gmail message body exceeds safe forward limit');
+      const metadata = includeAttachments ? await gmailApi.listAttachments(account, messageId) : [];
+      if (metadata.length > 10 || metadata.reduce((size, item) => size + item.size, 0) > 20 * 1024 * 1024) {
+        throw new Error('Gmail original attachments exceed safe forward limit');
+      }
+      const originalAttachments = await Promise.all(metadata.map(async item => {
+        const attachment = await gmailApi.getAttachment(account, messageId, item.partId);
+        return {
+          filename: attachment.filename,
+          content: attachment.content,
+          contentType: attachment.mimeType,
+          contentDisposition: attachment.contentId ? 'inline' as const : 'attachment' as const,
+          cid: attachment.contentId,
+        };
+      }));
+      const forwardHeader = '\n\n---------- Forwarded message ----------\n'
+        + `From: ${original.from || ''}\nDate: ${original.date || ''}\n`
+        + `Subject: ${original.subject || ''}\nTo: ${original.to || ''}\n\n`;
+      const composer: EmailComposer = {
+        from: account.email || account.user,
+        to,
+        subject: /^Fwd:/iu.test(original.subject || '') ? original.subject! : 'Fwd: ' + (original.subject || ''),
+        text: (text || '') + forwardHeader + (original.body || ''),
+        bcc: mergeBcc(account.defaultBcc, bcc),
+        references: original.messageIdHeader,
+        attachments: originalAttachments,
+      };
+      return previewResponse(safeSend.preview({ accountId, composer }));
+    });
+  }
 
   server.registerTool('imap_confirm_send', {
     description: 'Send a previously frozen safe-send draft exactly once.',
