@@ -102,6 +102,8 @@ For other MCP clients, configure a stdio server whose command is node and whose 
 
 The refresh token and client secret are stored under provider/account-bound Windows Credential Manager targets. accounts.json stores only non-secret metadata and target references. Gmail never falls back to password authentication.
 
+Google issues refresh tokens that expire after seven days when an external OAuth app remains in Testing mode and requests Gmail access. Plan to reauthorize with `node dist/enroll.js gmail-repair ACCOUNT_ID_OR_NAME` during testing. Each installation uses its own Google Cloud OAuth client; making this repository public does not publish or verify that OAuth app. Broader production use of restricted Gmail scopes may require Google's verification process. See [Google's refresh-token rules](https://developers.google.com/identity/protocols/oauth2/#expiration) and [restricted-scope verification guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
 Reauthorization: run node dist/enroll.js gmail-repair ACCOUNT_ID_OR_NAME. It obtains a fresh refresh token through browser OAuth, verifies authentication without reading mail, and restores the previous credential if verification fails.
 
 Common failures:
