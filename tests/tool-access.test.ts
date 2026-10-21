@@ -43,7 +43,7 @@ function registeredToolsFor(env: Record<string, string | undefined>): string[] {
   const fakeServer = { registerTool: (name: string) => names.push(name) };
   const stub: any = {};
   try {
-    registerTools(fakeServer as any, stub, stub, stub, stub);
+    registerTools(fakeServer as any, stub, stub, stub, stub, stub);
   } finally {
     for (const key of Object.keys(saved)) {
       if (saved[key] === undefined) delete process.env[key];
@@ -91,6 +91,11 @@ describe('resolveEnabledTools', () => {
     expect(set).toEqual(new Set(['imap_search_emails', 'imap_get_email']));
   });
 
+  it('preserves explicit Gmail API tool names in an allowlist', () => {
+    expect(resolveEnabledTools({ IMAP_MCP_ENABLED_TOOLS: 'GMAIL_API_GET_MESSAGE' }))
+      .toEqual(new Set(['gmail_api_get_message']));
+  });
+
   it('ignores empty entries and surrounding whitespace', () => {
     const set = resolveEnabledTools({
       IMAP_MCP_ENABLED_TOOLS: '  imap_list_folders ,, , imap_folder_status ',
@@ -117,6 +122,13 @@ describe('resolveEnabledTools', () => {
 
 describe('READ_ONLY_TOOLS subset', () => {
   it('includes core read tools', () => {
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_list_labels');
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_search_messages');
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_get_message');
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_list_attachments');
+    expect(READ_ONLY_TOOLS).toContain('gmail_api_download_attachment');
+    expect(READ_ONLY_TOOLS).not.toContain('gmail_api_preview_reply_to_message');
+    expect(READ_ONLY_TOOLS).not.toContain('gmail_api_preview_forward_message');
     expect(READ_ONLY_TOOLS).toContain('imap_search_emails');
     expect(READ_ONLY_TOOLS).toContain('imap_get_email');
     expect(READ_ONLY_TOOLS).toContain('imap_list_folders');
@@ -137,8 +149,7 @@ describe('registerTools gating', () => {
 
   it('keeps legacy direct-send tools hidden while exposing safe-send and save-draft when unrestricted', () => {
     const names = registeredToolsFor({});
-    // Sanity: the full surface is large and includes destructive tools.
-    expect(names.length).toBeGreaterThan(READ_ONLY_TOOLS.length);
+    expect(names).toHaveLength(48);
     expect(names).toContain('imap_delete_email');
     expect(names).not.toContain('imap_send_email');
     expect(names).not.toContain('imap_reply_to_email');
@@ -146,6 +157,8 @@ describe('registerTools gating', () => {
     expect(names).toContain('imap_preview_send_email');
     expect(names).toContain('imap_preview_reply_to_email');
     expect(names).toContain('imap_preview_forward_email');
+    expect(names).toContain('gmail_api_preview_reply_to_message');
+    expect(names).toContain('gmail_api_preview_forward_message');
     expect(names).toContain('imap_confirm_send');
     expect(names).toContain('imap_save_draft');
   });
@@ -169,6 +182,7 @@ describe('registerTools gating', () => {
 
   it('registers only the read-only subset in read-only mode', () => {
     const names = registeredToolsFor({ IMAP_MCP_READ_ONLY: 'true' });
+    expect(names).toHaveLength(21);
     expect(new Set(names)).toEqual(new Set(READ_ONLY_TOOLS));
     for (const tool of DESTRUCTIVE_TOOLS) {
       expect(names).not.toContain(tool);

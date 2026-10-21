@@ -9,6 +9,7 @@ import { registerTools } from './tools/index.js';
 import { AccountAuthResolver } from './credentials/account-auth.js';
 import { createGmailAccessTokenExchange } from './credentials/gmail-token-exchange.js';
 import { UnavailableCredentialBackend, WindowsCredentialBackend } from './credentials/windows-credential-backend.js';
+import { GmailApiService } from './services/gmail-api-service.js';
 
 // Silence any package version output to stdout
 const originalWrite = process.stdout.write.bind(process.stdout);
@@ -38,12 +39,13 @@ const imapService = new ImapService(authResolver);
 const accountManager = new AccountManager(credentialBackend);
 const smtpService = new SmtpService(authResolver);
 const spamService = new SpamService();
+const gmailApiService = new GmailApiService(authResolver);
 
 // Allow ImapService to auto-connect using stored credentials
 imapService.setAccountManager(accountManager);
 
 // Register all tools
-registerTools(server, imapService, accountManager, smtpService, spamService);
+registerTools(server, imapService, accountManager, smtpService, spamService, gmailApiService);
 
 async function main() {
   const transport = new StdioServerTransport();

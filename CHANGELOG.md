@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- Added three explicit Gmail API read-only tools for labels, message search, and metadata or bounded body reads. Gmail API string IDs remain separate from IMAP UIDs; the new path reuses OAuth and proxy handling without changing send or mailbox-mutation behavior.
+- Added Gmail API attachment listing and bounded download into the configured attachment root, plus API-ID reply and forward previews that use the existing frozen-draft confirmation gate. Gmail SMTP now relies on Gmail's own Sent copy by default; an explicit `saveToSent=true` retains IMAP append.
+
+### Security
+
+- Updated the MCP SDK, Mailparser, Nodemailer, Undici, Vitest, and affected transitive dependencies. The dependency audit now reports no known vulnerabilities.
+- Removed unused `nodemon` and its vulnerable development dependency chain.
+
+### Fixed
+
+- When a provider returns no results for a metadata-only From/To/Subject IMAP search, verify headers locally for mailboxes of at most 500 messages. This addresses a QQ Sent-folder case where server-side subject search returned empty while the message was present; message bodies are never fetched by the fallback.
+
+### Maintenance
+
+- Switched SMTP type imports to Nodemailer 10's bundled declarations without changing mail handling.
+- Corrected Dependabot configuration to use GitHub's default labels and removed its stale auto-merge claim.
+- Corrected Gmail repair/proxy guidance and added non-sending SMTP authentication to the provider smoke checklist.
 
 ## [0.1.1] - 2026-08-31
 

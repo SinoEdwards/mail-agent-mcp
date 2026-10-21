@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { safeSendTools } from '../src/tools/safe-send-tools.js';
 
-function harness(options: { sentCopyTimeoutMs?: number } = {}) {
+function harness(options: { sentCopyTimeoutMs?: number; gmailApi?: boolean } = {}) {
   const handlers = new Map<string, Function>();
   const server = { registerTool: vi.fn((name: string, _definition: unknown, handler: Function) => handlers.set(name, handler)) };
   const account = { id: 'acct-1', name: 'Account', host: 'imap.example', port: 993, tls: true, secure: true, user: 'me@example.com', email: 'Me <me@example.com>', password: '', defaultBcc: ['archive@example.com'], smtp: { host: 'smtp.example', port: 465, secure: true } };
@@ -45,9 +45,27 @@ function harness(options: { sentCopyTimeoutMs?: number } = {}) {
     getEmailContent: vi.fn(async () => original),
     getAttachmentContent: vi.fn(async () => ({ filename: 'original.txt', contentType: 'text/plain', content: originalAttachmentBuffer })),
   };
+  const gmailAttachment = Buffer.from('gmail attachment');
+  const gmailOriginal = {
+    id: 'api-id', threadId: 'thread-id', labelIds: ['INBOX'],
+    from: 'Alice <alice@example.com>', replyTo: 'Reply <reply@example.com>',
+    to: 'Me <ME@example.com>, Bob <bob@example.com>',
+    subject: 'Gmail subject', date: '2026-08-20T01:02:03Z',
+    messageIdHeader: '<gmail-original@example.com>', references: '<earlier@example.com>',
+    body: 'Synthetic original body', bodyTruncated: false,
+  };
+  const gmailApi = {
+    getMessage: vi.fn(async () => gmailOriginal),
+    listAttachments: vi.fn(async () => [{ partId: '2', filename: 'original.bin', mimeType: 'application/octet-stream', size: gmailAttachment.length }]),
+    getAttachment: vi.fn(async () => ({ partId: '2', filename: 'original.bin', mimeType: 'application/octet-stream', size: gmailAttachment.length, content: gmailAttachment })),
+  };
   let nextId = 0;
-  safeSendTools(server as any, imapService as any, accountManager as any, smtpService as any, { id: () => `draft-${++nextId}`, clock: () => 100, ttlMs: 1_000, ...options });
-  return { handlers, account, accountManager, smtpService, imapService, original, originalAttachmentBuffer, sentSnapshots };
+  safeSendTools(server as any, imapService as any, accountManager as any, smtpService as any, {
+    id: () => `draft-${++nextId}`, clock: () => 100, ttlMs: 1_000,
+    sentCopyTimeoutMs: options.sentCopyTimeoutMs,
+    gmailApiService: options.gmailApi ? gmailApi as any : undefined,
+  });
+  return { handlers, account, accountManager, smtpService, imapService, original, originalAttachmentBuffer, sentSnapshots, gmailApi, gmailOriginal, gmailAttachment };
 }
 
 function json(result: any) { return JSON.parse(result.content[0].text); }
@@ -78,6 +96,25 @@ describe('safe-send MCP tools', () => {
     expect(imapService.appendToSentFolder).toHaveBeenCalledTimes(1);
   });
 
+  it('skips Gmail Sent IMAP append by default but honors an explicit opt-in', async () => {
+    const { handlers, account, imapService, smtpService } = harness();
+    (account as any).auth = { kind: 'oauth2', provider: 'gmail' };
+    const first = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'first', text: 'body',
+    }));
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: first.draftId, confirmed: true })))
+      .toEqual({ status: 'sent' });
+    expect(imapService.appendToSentFolder).not.toHaveBeenCalled();
+
+    (account as any).saveToSent = true;
+    const second = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'second', text: 'body',
+    }));
+    await handlers.get('imap_confirm_send')!({ draftId: second.draftId, confirmed: true });
+    expect(imapService.appendToSentFolder).toHaveBeenCalledTimes(1);
+    expect(smtpService.sendEmail).toHaveBeenCalledTimes(2);
+  });
+
   it('previews a reply-all with self exclusion, thread headers, default BCC, and materialized new attachments', async () => {
     const { handlers, imapService, sentSnapshots } = harness();
     const preview = json(await handlers.get('imap_preview_reply_to_email')!({
@@ -102,6 +139,50 @@ describe('safe-send MCP tools', () => {
     expect(composer.attachments[0]).toMatchObject({ filename: 'new.bin' });
     expect(Buffer.isBuffer(composer.attachments[0].content)).toBe(true);
     expect(composer.attachments[0].content.toString()).toBe('new attachment');
+  });
+
+  it('previews a Gmail reply-all by API ID without IMAP and uses the same confirmation gate', async () => {
+    const { handlers, account, imapService, gmailApi, sentSnapshots } = harness({ gmailApi: true });
+    (account as any).auth = { kind: 'oauth2', provider: 'gmail' };
+    const preview = json(await handlers.get('gmail_api_preview_reply_to_message')!({
+      accountId: 'acct-1', messageId: 'api-id', text: 'My reply', replyAll: true,
+    }));
+    expect(preview.summary.to).toEqual(['reply@example.com', 'bob@example.com']);
+    expect(JSON.stringify(preview)).not.toContain('Synthetic original body');
+    expect(gmailApi.getMessage).toHaveBeenCalledWith(account, 'api-id');
+    expect(imapService.getEmailContent).not.toHaveBeenCalled();
+    await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true });
+    expect(sentSnapshots[0].composer).toMatchObject({
+      text: 'My reply', inReplyTo: '<gmail-original@example.com>',
+      references: '<earlier@example.com> <gmail-original@example.com>',
+    });
+    expect(imapService.appendToSentFolder).not.toHaveBeenCalled();
+  });
+
+  it('freezes Gmail forward content and attachments through the API before SMTP confirmation', async () => {
+    const { handlers, account, gmailApi, gmailAttachment, imapService, sentSnapshots } = harness({ gmailApi: true });
+    (account as any).auth = { kind: 'oauth2', provider: 'gmail' };
+    const preview = json(await handlers.get('gmail_api_preview_forward_message')!({
+      accountId: 'acct-1', messageId: 'api-id', to: 'you@example.com', includeAttachments: true,
+    }));
+    expect(JSON.stringify(preview)).not.toContain('Synthetic original body');
+    expect(gmailApi.getMessage).toHaveBeenCalledWith(account, 'api-id', { includeBody: true, maxBodyChars: 20_000 });
+    expect(gmailApi.getAttachment).toHaveBeenCalledWith(account, 'api-id', '2');
+    expect(imapService.getAttachmentContent).not.toHaveBeenCalled();
+    gmailAttachment.fill(0);
+    await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true });
+    expect(sentSnapshots[0].composer.text).toContain('Synthetic original body');
+    expect(sentSnapshots[0].composer.attachments[0].content.toString()).toBe('gmail attachment');
+  });
+
+  it('fails closed when a Gmail forward would omit a truncated original body', async () => {
+    const { handlers, account, gmailOriginal, smtpService } = harness({ gmailApi: true });
+    (account as any).auth = { kind: 'oauth2', provider: 'gmail' };
+    gmailOriginal.bodyTruncated = true;
+    await expect(handlers.get('gmail_api_preview_forward_message')!({
+      accountId: 'acct-1', messageId: 'api-id', to: 'you@example.com', includeAttachments: false,
+    })).rejects.toThrow('exceeds safe forward limit');
+    expect(smtpService.sendEmail).not.toHaveBeenCalled();
   });
 
   it('previews a forward verbatim and freezes downloaded original attachments before confirmation', async () => {
@@ -178,5 +259,43 @@ describe('safe-send MCP tools', () => {
     });
     expect(JSON.stringify(result)).not.toContain('provider detail');
     expect(smtpService.sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns after SMTP success when a required Sent copy cannot be composed', async () => {
+    const { handlers, smtpService, imapService } = harness();
+    smtpService.sendEmail.mockResolvedValueOnce({ messageId: '<id@example.com>' } as any);
+    const preview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'copy unavailable', text: 'body',
+    }));
+    const result = json(await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true }));
+    expect(result).toEqual({
+      status: 'sent',
+      warnings: [{ code: 'sent_copy_failed', message: 'Message sent, but saving a Sent-folder copy failed' }],
+    });
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: preview.draftId, confirmed: true })))
+      .toEqual({ status: 'already_sent' });
+    expect(smtpService.sendEmail).toHaveBeenCalledTimes(1);
+    expect(imapService.appendToSentFolder).not.toHaveBeenCalled();
+  });
+
+  it('does not warn about an absent raw copy when Sent append is disabled', async () => {
+    const { handlers, account, smtpService, imapService } = harness();
+    smtpService.sendEmail.mockResolvedValue({ messageId: '<id@example.com>' } as any);
+    (account as any).auth = { kind: 'oauth2', provider: 'gmail' };
+    const gmailPreview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'gmail auto-saved', text: 'body',
+    }));
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: gmailPreview.draftId, confirmed: true })))
+      .toEqual({ status: 'sent' });
+
+    delete (account as any).auth;
+    (account as any).saveToSent = false;
+    const disabledPreview = json(await handlers.get('imap_preview_send_email')!({
+      accountId: 'acct-1', to: 'you@example.com', subject: 'copy disabled', text: 'body',
+    }));
+    expect(json(await handlers.get('imap_confirm_send')!({ draftId: disabledPreview.draftId, confirmed: true })))
+      .toEqual({ status: 'sent' });
+    expect(smtpService.sendEmail).toHaveBeenCalledTimes(2);
+    expect(imapService.appendToSentFolder).not.toHaveBeenCalled();
   });
 });
